@@ -1,0 +1,46 @@
+{
+  "name": "pi-votacao-zk-blockchain",
+  "version": "1.0.0",
+  "description": "Sistema de votação eletrônica com ZK-SNARKs e Ethereum",
+  "main": "index.js",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "test:coverage": "hardhat coverage",
+    "deploy:local": "hardhat run scripts/deploy.js --network localhost",
+    "deploy:sepolia": "hardhat run scripts/deploy.js --network sepolia",
+    "interact:sepolia": "hardhat run scripts/interact.js --network sepolia",
+    "node": "hardhat node"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CompSci-Squad/pi-votacao-zk-blockchain.git"
+  },
+  "keywords": [
+    "blockchain",
+    "ethereum",
+    "solidity",
+    "hardhat",
+    "zk-snarks",
+    "voting"
+  ],
+  "author": "CompSci Squad",
+  "license": "MIT",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/CompSci-Squad/pi-votacao-zk-blockchain/issues"
+  },
+  "homepage": "https://github.com/CompSci-Squad/pi-votacao-zk-blockchain#readme",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-chai-matchers": "^2.1.2",
+    "@nomicfoundation/hardhat-ethers": "^4.0.6",
+    "@nomicfoundation/hardhat-mocha": "^3.0.13",
+    "@nomicfoundation/hardhat-toolbox": "^7.0.0",
+    "chai": "^4.5.0",
+    "dotenv": "^17.3.1",
+    "ethers": "^6.16.0",
+    "hardhat": "^3.1.12",
+    "mocha": "^11.7.5",
+    "solc": "^0.8.20"
+  }
+}
