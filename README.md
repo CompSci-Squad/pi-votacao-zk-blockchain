@@ -1,6 +1,6 @@
 # pi-votacao-zk-blockchain
 
-Sistema de votação eletrônica acadêmica baseado em **Ethereum** e **ZK-SNARKs** (Groth16).
+Sistema de votação eletrônica acadêmica baseado em **Ethereum** e **ZK-SNARKs** (PLONK).
 
 O contrato inteligente é a **única fonte de verdade** — nenhum banco de dados externo é necessário.  
 As provas de conhecimento zero garantem o sigilo do voto enquanto permitem verificação pública da eleição.
@@ -42,10 +42,12 @@ PENDING ──(openElection)──▶ OPEN ──(closeElection)──▶ FINISH
 
 ### Sinais públicos do circuito ZK
 
-| Índice | Significado |
-|--------|-------------|
-| `[0]`  | `nullifier` — impede votação dupla |
-| `[1]`  | `candidateId` — `0` = voto em branco, `MaxUint256` = voto nulo, `1..N` = candidato válido |
+| Índice | Sinal          | Significado |
+|--------|----------------|-------------|
+| `[0]`  | `merkle_root`    | Raiz da Merkle tree de eleitores autorizados |
+| `[1]`  | `nullifier_hash` | Compromisso anti-voto-duplo |
+| `[2]`  | `candidate_id`   | `0` = voto em branco, `999` = voto nulo, `1..N` = candidato válido |
+| `[3]`  | `election_id`    | Identificador único da eleição |
 
 ---
 
@@ -121,11 +123,12 @@ O script imprimirá os endereços dos contratos implantados e tentará a verific
 
 ### Substituir o Verifier placeholder
 
-Após gerar o `Verifier.sol` real com o SnarkJS no repositório de circuitos:
+Após gerar o `Verifier.sol` real com o SnarkJS (protocolo PLONK) no repositório de circuitos:
 
 1. Copie o arquivo gerado para `contracts/Verifier.sol` (sobrescrevendo o placeholder).
-2. Recompile: `npm run compile`.
-3. Faça um novo deploy.
+2. Verifique que a assinatura de `verifyProof(bytes memory, uint256[] memory)` corresponde à interface `IVerifier`.
+3. Recompile: `npm run compile`.
+4. Faça um novo deploy.
 
 ---
 

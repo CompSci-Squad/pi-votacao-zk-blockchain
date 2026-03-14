@@ -3,16 +3,14 @@ pragma solidity ^0.8.20;
 
 /**
  * @title MockVerifier
- * @notice Test-only verifier. Returns true for all proofs so that unit
+ * @notice Test-only PLONK verifier. Returns true for all proofs so that unit
  *         tests can exercise VotingContract without a real ZK backend.
  *         NEVER deploy this on a public network.
  */
 contract MockVerifier {
     function verifyProof(
-        uint[2] calldata,
-        uint[2][2] calldata,
-        uint[2] calldata,
-        uint[2] calldata
+        bytes memory,    /* _proof (ignored) */
+        uint256[] memory /* _pubSignals (ignored) */
     ) external pure returns (bool) {
         return true;
     }
