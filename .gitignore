@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build artifacts
+artifacts/
+cache/
+
+# Environment variables (never commit secrets)
+.env
+
+# Coverage reports
+coverage/
+coverage.json
+
+# TypeChain type bindings
+typechain/
+typechain-types/
+
+# Hardhat ignition deployments (if used)
+ignition/deployments/
+
+# Misc
+.DS_Store
+*.log
