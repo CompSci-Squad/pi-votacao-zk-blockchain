@@ -10,11 +10,14 @@ import "./Verifier.sol";
  * Proof-of-concept for 15 voters and 2 candidates.
  * Everything is stored on-chain — no database is used.
  *
- * Public-signal layout expected from voter_proof.circom:
+ * Public-signal layout expected from voter_proof.circom
+ * (canonical definition in IVerifier — see Verifier.sol):
  *   pubSignals[0] — merkle_root    (voter Merkle tree root)
- *   pubSignals[1] — nullifier_hash (anti-double-vote commitment)
- *   pubSignals[2] — candidate_id   (0 = blank, 999 = null, 1..N = sequential candidate ID)
+ *   pubSignals[1] — nullifier_hash (Poseidon(voter_id, election_id, race_id))
+ *   pubSignals[2] — candidate_id   (0 = blank, 999 = null, 1..N = sequential ID)
  *   pubSignals[3] — election_id    (unique election identifier)
+ *   pubSignals[4] — race_id        (cargo identifier — PUBLIC signal, prevents cross-race
+ *                                   proof reuse by a malicious relayer)
  */
 contract VotingContract {
     // ─────────────────────────── State variables ────────────────────────────
@@ -36,6 +39,8 @@ contract VotingContract {
     uint256 public voterMerkleRoot;
     uint256[] public voterHashes;
     mapping(uint256 => bool) public usedNullifiers;
+    /// @dev Tracks which ballot numbers have been assigned to prevent duplicates.
+    mapping(uint256 => bool) private candidateNumberUsed;
 
     struct Candidate {
         uint256 id;
@@ -50,9 +55,14 @@ contract VotingContract {
     uint256 public nullVotes;
     uint256 public totalVotes;
 
-    // Special sentinel values for blank / null votes (must match the ZK circuit)
-    uint256 public constant BLANK_VOTE_ID = 0;
-    uint256 public constant NULL_VOTE_ID = 999;
+    // ───────────────────────────── Constants ────────────────────────────────
+
+    /// @notice Candidate ID representing a blank vote (voto branco)
+    uint256 public constant BLANK_VOTE = 0;
+    /// @notice Candidate ID representing a null/invalid vote (voto nulo)
+    uint256 public constant NULL_VOTE  = 999;
+    /// @notice Maximum number of registered voters (Merkle depth 4 → 2^4 = 16 leaves)
+    uint256 public constant MAX_VOTERS = 16;
 
     // ──────────────────────────────── Events ────────────────────────────────
 
@@ -72,11 +82,16 @@ contract VotingContract {
     error ElectionNotOpen();
     error ElectionNotFinished();
     error NoVoterHashesRegistered();
+    error TooManyVoters(uint256 provided, uint256 maximum);
     error InvalidMerkleRoot(uint256 provided, uint256 expected);
     error InvalidElectionId(uint256 provided, uint256 expected);
+    error InvalidRaceId(uint256 provided);
     error InvalidProof();
     error NullifierAlreadyUsed(uint256 nullifier);
     error CandidateNotFound(uint256 candidateId);
+    error VoterHashesAlreadyRegistered();
+    error InvalidVoterHash(uint256 index);
+    error CandidateNumberAlreadyUsed(uint256 number);
 
     // ─────────────────────────────── Modifiers ──────────────────────────────
 
@@ -97,6 +112,7 @@ contract VotingContract {
     // ────────────────────────────── Constructor ──────────────────────────────
 
     /**
+     * @notice Deploy the voting contract.
      * @param _verifier Address of the deployed Verifier (or MockVerifier for tests).
      */
     constructor(address _verifier) {
@@ -110,6 +126,8 @@ contract VotingContract {
     /**
      * @notice Initialise the election metadata and assign a unique election ID.
      * @dev Can only be called once while the election is in PENDING state.
+     * @param _name        Human-readable election name.
+     * @param _description Short description of the election.
      */
     function createElection(
         string calldata _name,
@@ -125,35 +143,47 @@ contract VotingContract {
 
     /**
      * @notice Add a candidate to the election.
+     * @param _name   Candidate full name.
+     * @param _party  Party name or abbreviation.
+     * @param _number Official ballot number.
      */
     function addCandidate(
         string calldata _name,
         string calldata _party,
         uint256 _number
     ) external onlyAdmin inState(ElectionState.PENDING) {
+        if (candidateNumberUsed[_number]) revert CandidateNumberAlreadyUsed(_number);
+        candidateNumberUsed[_number] = true;
         uint256 id = candidates.length + 1; // IDs start at 1
         candidates.push(Candidate(id, _name, _party, _number, 0));
         emit CandidateAdded(id, _name, _number);
     }
 
     /**
-     * @notice Register the voter identity hashes (for public auditability).
-     * @dev Replaces any previously stored hashes.
-     * @param _hashes Array of Poseidon(voter_id) hashes
+     * @notice Register the voter identity hashes for public auditability.
+     * @dev Idempotency: reverts if hashes are already registered to prevent
+     *      accidental overwrite. Maximum MAX_VOTERS (16) entries. All hashes
+     *      must be non-zero (zero would mean an empty/unconstrained leaf).
+     * @param _hashes Array of Poseidon(voter_id) hashes — one per registered voter.
      */
     function registerVoterHashes(
         uint256[] calldata _hashes
     ) external onlyAdmin inState(ElectionState.PENDING) {
-        delete voterHashes;
-        for (uint256 i = 0; i < _hashes.length; i++) {
+        if (_hashes.length > MAX_VOTERS)
+            revert TooManyVoters(_hashes.length, MAX_VOTERS);
+        if (voterHashes.length != 0) revert VoterHashesAlreadyRegistered();
+        uint256 n = _hashes.length;
+        for (uint256 i = 0; i < n; i++) {
+            if (_hashes[i] == 0) revert InvalidVoterHash(i);
             voterHashes.push(_hashes[i]);
         }
         emit VoterHashesRegistered(_hashes);
     }
 
     /**
-     * @notice Set the Merkle root of the voter set (used inside the ZK circuit).
+     * @notice Set the Merkle root of the voter set used inside the ZK circuit.
      * @dev Voter hashes must be registered before setting the root.
+     * @param _root Poseidon Merkle root of the depth-4 binary tree of voter hashes.
      */
     function setMerkleRoot(
         uint256 _root
@@ -187,67 +217,108 @@ contract VotingContract {
 
     /**
      * @notice Cast a vote with a PLONK ZK-SNARK proof.
+     * @dev Follows checks-effects-interactions: nullifier marked as used and votes
+     *      counted BEFORE the external call to verifier.verifyProof() to prevent
+     *      any reentrancy. If verifyProof reverts, the entire transaction reverts
+     *      and all state changes are undone — the nullifier is NOT spent. Safe.
      *
-     * @param _proof      PLONK proof bytes (output of snarkjs plonk prove)
-     * @param _pubSignals [merkle_root, nullifier_hash, candidate_id, election_id]
-     *
-     * candidateId semantics:
-     *   0    → blank vote (voto branco)
-     *   999  → null / invalid vote (voto nulo)
-     *   1..N → valid sequential candidate ID
+     * @param _proof      PLONK proof bytes (output of snarkjs plonk prove).
+     * @param _pubSignals [merkle_root, nullifier_hash, candidate_id, election_id, race_id]
+     *                    — must match the layout in voter_proof.circom / IVerifier.
      */
     function castVote(
         bytes calldata _proof,
-        uint256[4] calldata _pubSignals
+        uint256[5] calldata _pubSignals
     ) external inState(ElectionState.OPEN) {
         uint256 merkleRoot  = _pubSignals[0];
         uint256 nullifier   = _pubSignals[1];
         uint256 candidateId = _pubSignals[2];
         uint256 electionId  = _pubSignals[3];
+        uint256 raceId      = _pubSignals[4];
 
-        // 1. Validate Merkle root
+        // ── CHECKS ────────────────────────────────────────────────────────
         if (merkleRoot != voterMerkleRoot)
             revert InvalidMerkleRoot(merkleRoot, voterMerkleRoot);
-
-        // 2. Validate election ID
         if (electionId != currentElectionId)
             revert InvalidElectionId(electionId, currentElectionId);
-
-        // 3. Prevent double voting
+        if (raceId == 0)
+            revert InvalidRaceId(raceId);
         if (usedNullifiers[nullifier])
             revert NullifierAlreadyUsed(nullifier);
+
+        // ── EFFECTS: write state BEFORE external call (CEI pattern) ───────
         usedNullifiers[nullifier] = true;
 
-        // 4. Verify the PLONK ZK proof
-        uint256[] memory pubSignalsArr = new uint256[](4);
-        pubSignalsArr[0] = merkleRoot;
-        pubSignalsArr[1] = nullifier;
-        pubSignalsArr[2] = candidateId;
-        pubSignalsArr[3] = electionId;
-        if (!verifier.verifyProof(_proof, pubSignalsArr)) revert InvalidProof();
-
-        // 5. Register the vote
-        if (candidateId == BLANK_VOTE_ID) {
+        if (candidateId == BLANK_VOTE) {
             blankVotes++;
-        } else if (candidateId == NULL_VOTE_ID || candidateId == type(uint256).max) {
+        } else if (candidateId == NULL_VOTE || candidateId == type(uint256).max) {
             nullVotes++;
         } else {
             if (candidateId > candidates.length)
                 revert CandidateNotFound(candidateId);
             candidates[candidateId - 1].voteCount++;
         }
-
         totalVotes++;
+
+        // ── INTERACTIONS: external call last ──────────────────────────────
+        uint256[] memory pubSignalsArr = new uint256[](5);
+        pubSignalsArr[0] = merkleRoot;
+        pubSignalsArr[1] = nullifier;
+        pubSignalsArr[2] = candidateId;
+        pubSignalsArr[3] = electionId;
+        pubSignalsArr[4] = raceId;
+        if (!verifier.verifyProof(_proof, pubSignalsArr)) revert InvalidProof();
+
         emit VoteCast(nullifier, candidateId);
     }
 
     // ──────────────────────────── View functions ─────────────────────────────
 
     /**
+     * @notice Return the pre-election zerésima — confirms zero votes before opening.
+     * @dev Restricted to PENDING state. blockTimestamp and blockNumber provide a
+     *      tamper-evidence timestamp of the zero-audit.
+     * @return _electionName   Name of the election.
+     * @return _candidates     All registered candidates (voteCount should be 0).
+     * @return voterCount      Number of registered voter hashes.
+     * @return allZero         True iff no candidate has any votes yet.
+     * @return _blockTimestamp Block timestamp at time of the zerésima call.
+     * @return _blockNumber    Block number at time of the zerésima call.
+     */
+    function getZeresima()
+        external
+        view
+        inState(ElectionState.PENDING)
+        returns (
+            string memory _electionName,
+            Candidate[] memory _candidates,
+            uint256 voterCount,
+            bool allZero,
+            uint256 _blockTimestamp,
+            uint256 _blockNumber
+        )
+    {
+        _electionName   = electionName;
+        _candidates     = candidates;
+        voterCount      = voterHashes.length;
+        _blockTimestamp = block.timestamp;
+        _blockNumber    = block.number;
+
+        allZero = true;
+        uint256 n = candidates.length;
+        for (uint256 i = 0; i < n; i++) {
+            if (candidates[i].voteCount > 0) {
+                allZero = false;
+                break;
+            }
+        }
+    }
+
+    /**
      * @notice Return the current election results.
      * @return _candidates  Array of Candidate structs with updated vote counts.
      * @return _blankVotes  Number of blank votes.
-     * @return _nullVotes   Number of null / invalid votes.
+     * @return _nullVotes   Number of null/invalid votes.
      * @return _totalVotes  Total number of votes cast.
      */
     function getResults()
@@ -262,12 +333,39 @@ contract VotingContract {
     {
         _candidates = candidates;
         _blankVotes = blankVotes;
-        _nullVotes = nullVotes;
+        _nullVotes  = nullVotes;
+        _totalVotes = totalVotes;
+    }
+
+    /**
+     * @notice Return election results for a specific race.
+     * @dev For this single-race PoC, raceId must be 1.
+     * @param raceId Race identifier (must be 1 in this PoC).
+     * @return _candidates  Array of Candidate structs with updated vote counts.
+     * @return _blankVotes  Number of blank votes.
+     * @return _nullVotes   Number of null/invalid votes.
+     * @return _totalVotes  Total number of votes cast.
+     */
+    function getRaceResults(uint256 raceId)
+        external
+        view
+        returns (
+            Candidate[] memory _candidates,
+            uint256 _blankVotes,
+            uint256 _nullVotes,
+            uint256 _totalVotes
+        )
+    {
+        if (raceId != 1) revert InvalidRaceId(raceId);
+        _candidates = candidates;
+        _blankVotes = blankVotes;
+        _nullVotes  = nullVotes;
         _totalVotes = totalVotes;
     }
 
     /**
      * @notice Return the registered voter hashes for public auditability.
+     * @return Array of Poseidon(voter_id) hashes.
      */
     function getVoterHashes() external view returns (uint256[] memory) {
         return voterHashes;
@@ -275,48 +373,46 @@ contract VotingContract {
 
     /**
      * @notice Return all candidates.
+     * @return Array of all Candidate structs.
      */
     function getCandidates() external view returns (Candidate[] memory) {
         return candidates;
     }
 
     /**
+     * @notice Return all candidates for a specific race.
+     * @dev For this single-race PoC, raceId must be 1.
+     * @param raceId Race identifier (must be 1 in this PoC).
+     * @return Array of all Candidate structs.
+     */
+    function getCandidates(uint256 raceId) external view returns (Candidate[] memory) {
+        if (raceId != 1) revert InvalidRaceId(raceId);
+        return candidates;
+    }
+
+    /**
      * @notice Return the number of registered candidates.
+     * @return Number of candidates added so far.
      */
     function getCandidateCount() external view returns (uint256) {
         return candidates.length;
     }
 
     /**
-     * @notice Return zerésima data — confirms zero votes before opening the election.
-     * @return _electionName    Name of the election.
-     * @return candidateCount   Number of registered candidates.
-     * @return voterCount       Number of registered voter hashes.
-     * @return totalVotesBefore Total votes cast so far (should be 0 before opening).
-     * @return allCandidatesZero True if no candidate has received any votes yet.
+     * @notice Check whether a nullifier has already been used.
+     * @dev race_id is encoded inside the nullifier via
+     *      Poseidon(voter_id, election_id, race_id). The raceId parameter is
+     *      decorative for API clarity and must equal 1 in this PoC.
+     * @param raceId    Race identifier (must be 1; decorative — race embeds in nullifier).
+     * @param nullifier Poseidon(voter_id, election_id, race_id) commitment.
+     * @return True if the nullifier has already been spent.
      */
-    function getZeresima()
+    function isNullifierUsed(uint256 raceId, uint256 nullifier)
         external
         view
-        returns (
-            string memory _electionName,
-            uint256 candidateCount,
-            uint256 voterCount,
-            uint256 totalVotesBefore,
-            bool allCandidatesZero
-        )
+        returns (bool)
     {
-        _electionName = electionName;
-        candidateCount = candidates.length;
-        voterCount = voterHashes.length;
-        totalVotesBefore = totalVotes;
-
-        allCandidatesZero = true;
-        for (uint256 i = 0; i < candidates.length; i++) {
-            if (candidates[i].voteCount > 0) {
-                allCandidatesZero = false;
-                break;
-            }
-        }
+        if (raceId != 1) revert InvalidRaceId(raceId);
+        return usedNullifiers[nullifier];
     }
 }
