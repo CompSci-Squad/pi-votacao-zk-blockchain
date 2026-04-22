@@ -1,14 +1,27 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity 0.8.24;
 
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./Verifier.sol";
 
 /**
  * @title VotingContract
  * @notice Electronic voting system with PLONK ZK-SNARK proof verification.
  *
- * Proof-of-concept for 15 voters and 2 candidates.
+ * Proof-of-concept for 15 voters and 2 candidates, single race (raceId = 0).
  * Everything is stored on-chain — no database is used.
+ *
+ * Design notes:
+ *   • Storage uses a 2-D nullifier mapping `nullifiers[raceId][nullifier]` for
+ *     forward compatibility with a future multi-race extension. In this PoC the
+ *     only valid raceId is 0 — both `castVote` and `isNullifierUsed` enforce that.
+ *   • `castVote` follows the Checks-Effects-Interactions pattern in the strict
+ *     order mandated by the project security invariants:
+ *         CHECKS (state, params, nullifier, ZK proof)
+ *           → EFFECTS (write nullifier, update tallies)
+ *             → INTERACTIONS (emit VoteCast)
+ *     The OpenZeppelin `ReentrancyGuard` provides defence-in-depth against any
+ *     misbehaving verifier implementation.
  *
  * Public-signal layout expected from voter_proof.circom
  * (canonical definition in IVerifier — see Verifier.sol):
@@ -19,7 +32,7 @@ import "./Verifier.sol";
  *   pubSignals[4] — race_id        (cargo identifier — PUBLIC signal, prevents cross-race
  *                                   proof reuse by a malicious relayer)
  */
-contract VotingContract {
+contract VotingContract is ReentrancyGuard {
     // ─────────────────────────── State variables ────────────────────────────
 
     string public electionName;
@@ -38,7 +51,10 @@ contract VotingContract {
     uint256 public currentElectionId;
     uint256 public voterMerkleRoot;
     uint256[] public voterHashes;
-    mapping(uint256 => bool) public usedNullifiers;
+
+    /// @notice nullifiers[raceId][nullifier] = used. PoC always uses raceId = 0.
+    mapping(uint256 => mapping(uint256 => bool)) public nullifiers;
+
     /// @dev Tracks which ballot numbers have been assigned to prevent duplicates.
     mapping(uint256 => bool) private candidateNumberUsed;
 
@@ -63,6 +79,8 @@ contract VotingContract {
     uint256 public constant NULL_VOTE  = 999;
     /// @notice Maximum number of registered voters (Merkle depth 4 → 2^4 = 16 leaves)
     uint256 public constant MAX_VOTERS = 16;
+    /// @notice Canonical raceId for this single-race PoC. Multi-race is a future iteration.
+    uint256 public constant POC_RACE_ID = 0;
 
     // ──────────────────────────────── Events ────────────────────────────────
 
@@ -71,7 +89,11 @@ contract VotingContract {
     event VoterHashesRegistered(uint256[] hashes);
     event MerkleRootSet(uint256 root);
     event ElectionOpened(uint256 timestamp, uint256 electionId);
-    event VoteCast(uint256 indexed nullifier, uint256 indexed candidateId);
+    event VoteCast(
+        uint256 indexed nullifier,
+        uint256 indexed raceId,
+        uint256 indexed candidateId
+    );
     event ElectionClosed(uint256 timestamp, uint256 totalVotes);
 
     // ──────────────────────────────── Errors ────────────────────────────────
@@ -86,6 +108,7 @@ contract VotingContract {
     error InvalidMerkleRoot(uint256 provided, uint256 expected);
     error InvalidElectionId(uint256 provided, uint256 expected);
     error InvalidRaceId(uint256 provided);
+    error RaceIdMismatch(uint256 paramRaceId, uint256 signalRaceId);
     error InvalidProof();
     error NullifierAlreadyUsed(uint256 nullifier);
     error CandidateNotFound(uint256 candidateId);
@@ -217,59 +240,84 @@ contract VotingContract {
 
     /**
      * @notice Cast a vote with a PLONK ZK-SNARK proof.
-     * @dev Follows checks-effects-interactions: nullifier marked as used and votes
-     *      counted BEFORE the external call to verifier.verifyProof() to prevent
-     *      any reentrancy. If verifyProof reverts, the entire transaction reverts
-     *      and all state changes are undone — the nullifier is NOT spent. Safe.
      *
-     * @param _proof      PLONK proof bytes (output of snarkjs plonk prove).
-     * @param _pubSignals [merkle_root, nullifier_hash, candidate_id, election_id, race_id]
-     *                    — must match the layout in voter_proof.circom / IVerifier.
+     * @dev Strict Checks-Effects-Interactions ordering as mandated by the
+     *      project security invariants:
+     *
+     *        CHECKS:
+     *          1. Election is OPEN (modifier).
+     *          2. raceId == POC_RACE_ID (single-race PoC).
+     *          3. pubSignals[0] (merkle_root) matches on-chain voterMerkleRoot.
+     *          4. pubSignals[3] (election_id) matches currentElectionId.
+     *          5. pubSignals[4] (race_id)    matches the raceId function param.
+     *          6. nullifier has not been used for this race.
+     *          7. ZK proof verifies.
+     *
+     *        EFFECTS (state writes happen AFTER proof verification, so a
+     *        malicious or buggy verifier cannot leave inconsistent state):
+     *          8. nullifiers[raceId][nullifier] = true.
+     *          9. tally counters incremented.
+     *
+     *        INTERACTIONS:
+     *         10. VoteCast event emitted.
+     *
+     *      `nonReentrant` provides defence-in-depth in case the verifier
+     *      address is ever swapped for a non-trusted implementation.
+     *
+     * @param raceId      Race identifier — must equal POC_RACE_ID (0) in this PoC.
+     * @param pubSignals  [merkle_root, nullifier_hash, candidate_id, election_id, race_id]
+     * @param proof       PLONK proof bytes (output of snarkjs plonk prove).
      */
     function castVote(
-        bytes calldata _proof,
-        uint256[5] calldata _pubSignals
-    ) external inState(ElectionState.OPEN) {
-        uint256 merkleRoot  = _pubSignals[0];
-        uint256 nullifier   = _pubSignals[1];
-        uint256 candidateId = _pubSignals[2];
-        uint256 electionId  = _pubSignals[3];
-        uint256 raceId      = _pubSignals[4];
-
+        uint256 raceId,
+        uint256[5] calldata pubSignals,
+        bytes calldata proof
+    ) external nonReentrant inState(ElectionState.OPEN) {
         // ── CHECKS ────────────────────────────────────────────────────────
+        if (raceId != POC_RACE_ID) revert InvalidRaceId(raceId);
+
+        uint256 merkleRoot  = pubSignals[0];
+        uint256 nullifier   = pubSignals[1];
+        uint256 candidateId = pubSignals[2];
+        uint256 electionId  = pubSignals[3];
+        uint256 sigRaceId   = pubSignals[4];
+
         if (merkleRoot != voterMerkleRoot)
             revert InvalidMerkleRoot(merkleRoot, voterMerkleRoot);
         if (electionId != currentElectionId)
             revert InvalidElectionId(electionId, currentElectionId);
-        if (raceId == 0)
-            revert InvalidRaceId(raceId);
-        if (usedNullifiers[nullifier])
+        if (sigRaceId != raceId)
+            revert RaceIdMismatch(raceId, sigRaceId);
+        if (nullifiers[raceId][nullifier])
             revert NullifierAlreadyUsed(nullifier);
 
-        // ── EFFECTS: write state BEFORE external call (CEI pattern) ───────
-        usedNullifiers[nullifier] = true;
-
-        if (candidateId == BLANK_VOTE) {
-            blankVotes++;
-        } else if (candidateId == NULL_VOTE || candidateId == type(uint256).max) {
-            nullVotes++;
-        } else {
-            if (candidateId > candidates.length)
-                revert CandidateNotFound(candidateId);
-            candidates[candidateId - 1].voteCount++;
-        }
-        totalVotes++;
-
-        // ── INTERACTIONS: external call last ──────────────────────────────
+        // SnarkJS PLONK verifier expects a dynamic uint256[] — convert from
+        // the calldata fixed array. Mandatory at the verifier ABI boundary.
         uint256[] memory pubSignalsArr = new uint256[](5);
         pubSignalsArr[0] = merkleRoot;
         pubSignalsArr[1] = nullifier;
         pubSignalsArr[2] = candidateId;
         pubSignalsArr[3] = electionId;
-        pubSignalsArr[4] = raceId;
-        if (!verifier.verifyProof(_proof, pubSignalsArr)) revert InvalidProof();
+        pubSignalsArr[4] = sigRaceId;
+        if (!verifier.verifyProof(proof, pubSignalsArr)) revert InvalidProof();
 
-        emit VoteCast(nullifier, candidateId);
+        // ── EFFECTS ───────────────────────────────────────────────────────
+        // 🔒 Nullifier MUST be written before any event emission.
+        nullifiers[raceId][nullifier] = true;
+        totalVotes++;
+
+        if (candidateId == BLANK_VOTE) {
+            blankVotes++;
+        } else if (candidateId == NULL_VOTE) {
+            nullVotes++;
+        } else {
+            if (candidateId == 0 || candidateId > candidates.length)
+                revert CandidateNotFound(candidateId);
+            candidates[candidateId - 1].voteCount++;
+        }
+
+        // ── INTERACTIONS ──────────────────────────────────────────────────
+        emit VoteCast(nullifier, raceId, candidateId);
     }
 
     // ──────────────────────────── View functions ─────────────────────────────
@@ -315,7 +363,7 @@ contract VotingContract {
     }
 
     /**
-     * @notice Return the current election results.
+     * @notice Return the current election results (single-race PoC accessor).
      * @return _candidates  Array of Candidate structs with updated vote counts.
      * @return _blankVotes  Number of blank votes.
      * @return _nullVotes   Number of null/invalid votes.
@@ -339,12 +387,8 @@ contract VotingContract {
 
     /**
      * @notice Return election results for a specific race.
-     * @dev For this single-race PoC, raceId must be 1.
-     * @param raceId Race identifier (must be 1 in this PoC).
-     * @return _candidates  Array of Candidate structs with updated vote counts.
-     * @return _blankVotes  Number of blank votes.
-     * @return _nullVotes   Number of null/invalid votes.
-     * @return _totalVotes  Total number of votes cast.
+     * @dev Multi-race-ready API. PoC accepts only raceId = 0.
+     * @param raceId Race identifier (must be 0 in this PoC).
      */
     function getRaceResults(uint256 raceId)
         external
@@ -356,7 +400,7 @@ contract VotingContract {
             uint256 _totalVotes
         )
     {
-        if (raceId != 1) revert InvalidRaceId(raceId);
+        if (raceId != POC_RACE_ID) revert InvalidRaceId(raceId);
         _candidates = candidates;
         _blankVotes = blankVotes;
         _nullVotes  = nullVotes;
@@ -365,15 +409,13 @@ contract VotingContract {
 
     /**
      * @notice Return the registered voter hashes for public auditability.
-     * @return Array of Poseidon(voter_id) hashes.
      */
     function getVoterHashes() external view returns (uint256[] memory) {
         return voterHashes;
     }
 
     /**
-     * @notice Return all candidates.
-     * @return Array of all Candidate structs.
+     * @notice Return all candidates (single-race PoC accessor).
      */
     function getCandidates() external view returns (Candidate[] memory) {
         return candidates;
@@ -381,38 +423,39 @@ contract VotingContract {
 
     /**
      * @notice Return all candidates for a specific race.
-     * @dev For this single-race PoC, raceId must be 1.
-     * @param raceId Race identifier (must be 1 in this PoC).
-     * @return Array of all Candidate structs.
+     * @dev Multi-race-ready API. PoC accepts only raceId = 0.
      */
-    function getCandidates(uint256 raceId) external view returns (Candidate[] memory) {
-        if (raceId != 1) revert InvalidRaceId(raceId);
+    function getCandidatesByRace(uint256 raceId)
+        external
+        view
+        returns (Candidate[] memory)
+    {
+        if (raceId != POC_RACE_ID) revert InvalidRaceId(raceId);
         return candidates;
     }
 
     /**
      * @notice Return the number of registered candidates.
-     * @return Number of candidates added so far.
      */
     function getCandidateCount() external view returns (uint256) {
         return candidates.length;
     }
 
     /**
-     * @notice Check whether a nullifier has already been used.
-     * @dev race_id is encoded inside the nullifier via
-     *      Poseidon(voter_id, election_id, race_id). The raceId parameter is
-     *      decorative for API clarity and must equal 1 in this PoC.
-     * @param raceId    Race identifier (must be 1; decorative — race embeds in nullifier).
+     * @notice Check whether a nullifier has already been used for a given race.
+     * @dev PoC accepts only raceId = 0. The nullifier itself is bound to the
+     *      race via the circuit formula Poseidon(voter_id, election_id, race_id),
+     *      so a vote for race A cannot replay as a vote for race B.
+     * @param raceId    Race identifier (must be 0 in this PoC).
      * @param nullifier Poseidon(voter_id, election_id, race_id) commitment.
-     * @return True if the nullifier has already been spent.
+     * @return True if the nullifier has already been spent for this race.
      */
     function isNullifierUsed(uint256 raceId, uint256 nullifier)
         external
         view
         returns (bool)
     {
-        if (raceId != 1) revert InvalidRaceId(raceId);
-        return usedNullifiers[nullifier];
+        if (raceId != POC_RACE_ID) revert InvalidRaceId(raceId);
+        return nullifiers[raceId][nullifier];
     }
 }
