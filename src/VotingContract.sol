@@ -2,7 +2,7 @@
 pragma solidity 0.8.24;
 
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "./Verifier.sol";
+import "./IVerifier.sol";
 
 /**
  * @title VotingContract
@@ -266,12 +266,14 @@ contract VotingContract is ReentrancyGuard {
      *
      * @param raceId      Race identifier — must equal POC_RACE_ID (0) in this PoC.
      * @param pubSignals  [merkle_root, nullifier_hash, candidate_id, election_id, race_id]
-     * @param proof       PLONK proof bytes (output of snarkjs plonk prove).
+     * @param proof       PLONK proof — 24 field elements as emitted by
+     *                    `snarkjs.plonk.exportSolidityCallData` and consumed
+     *                    by the snarkjs-generated PlonkVerifier.
      */
     function castVote(
         uint256 raceId,
-        uint256[5] calldata pubSignals,
-        bytes calldata proof
+        uint256[5]  calldata pubSignals,
+        uint256[24] calldata proof
     ) external nonReentrant inState(ElectionState.OPEN) {
         // ── CHECKS ────────────────────────────────────────────────────────
         if (raceId != POC_RACE_ID) revert InvalidRaceId(raceId);
@@ -291,15 +293,9 @@ contract VotingContract is ReentrancyGuard {
         if (nullifiers[raceId][nullifier])
             revert NullifierAlreadyUsed(nullifier);
 
-        // SnarkJS PLONK verifier expects a dynamic uint256[] — convert from
-        // the calldata fixed array. Mandatory at the verifier ABI boundary.
-        uint256[] memory pubSignalsArr = new uint256[](5);
-        pubSignalsArr[0] = merkleRoot;
-        pubSignalsArr[1] = nullifier;
-        pubSignalsArr[2] = candidateId;
-        pubSignalsArr[3] = electionId;
-        pubSignalsArr[4] = sigRaceId;
-        if (!verifier.verifyProof(proof, pubSignalsArr)) revert InvalidProof();
+        // Direct call into the snarkjs-generated PlonkVerifier — calldata
+        // fixed-array signatures match exactly, no conversion needed.
+        if (!verifier.verifyProof(proof, pubSignals)) revert InvalidProof();
 
         // ── EFFECTS ───────────────────────────────────────────────────────
         // 🔒 Nullifier MUST be written before any event emission.

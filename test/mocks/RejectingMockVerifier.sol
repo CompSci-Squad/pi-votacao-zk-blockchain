@@ -14,8 +14,8 @@ pragma solidity 0.8.24;
  */
 contract RejectingMockVerifier {
     function verifyProof(
-        bytes memory /* _proof */,
-        uint256[] memory /* _pubSignals */
+        uint256[24] calldata /* _proof */,
+        uint256[5]  calldata /* _pubSignals */
     ) external pure returns (bool) {
         return false;
     }

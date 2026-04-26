@@ -1,0 +1,47 @@
+# Foundry configuration for pi-votacao-zk-blockchain.
+#
+# Layout: src/ for production contracts, test/ for Foundry tests, script/ for
+# deploy scripts, lib/ for git-submodule deps. The legacy Hardhat-style
+# scripts/ directory is kept for the JS Mocha integration suite and the
+# bench/sync utilities; Foundry ignores it.
+
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+test = "test"
+script = "script"
+cache_path = "cache"
+
+# Pinned to match VotingContract.sol pragma. Verifier.sol's `>=0.7.0 <0.9.0`
+# range is satisfied by 0.8.24 — confirmed against the SnarkJS-generated file.
+solc_version = "0.8.24"
+optimizer = true
+optimizer_runs = 200
+via_ir = true
+evm_version = "paris"
+verbosity = 2
+
+# Mock verifiers under test/mocks/ are test-only contracts and must never be
+# part of the production deploy artifacts. They live under test/ so forge
+# treats them as test sources, but they are referenced by deploy scripts in
+# the local profile (see script/DeployLocal.s.sol).
+
+[fuzz]
+runs = 256
+max_test_rejects = 65_536
+
+[invariant]
+runs = 64
+depth = 32
+fail_on_revert = false
+
+# Local dev profile — faster iteration, no optimizer.
+[profile.local]
+optimizer = false
+
+# CI profile — heavier fuzzing, more verbose.
+[profile.ci]
+verbosity = 3
+fuzz = { runs = 1024 }
+invariant = { runs = 256, depth = 64 }

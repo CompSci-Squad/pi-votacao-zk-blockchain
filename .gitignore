@@ -1,9 +1,14 @@
 # Dependencies
 node_modules/
 
-# Build artifacts
+# Build artifacts (Hardhat + Foundry)
 artifacts/
 cache/
+out/
+broadcast/
+
+# Foundry lockfile is generated; libs are submodules so don't track lib/ here
+foundry.lock
 
 # Environment variables (never commit secrets)
 .env

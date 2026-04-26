@@ -17,9 +17,6 @@ pi-votacao-zk-blockchain/
 │   ├── Verifier.sol               # Placeholder — substituído pelo arquivo gerado pelo SnarkJS
 │   ├── MockVerifier.sol           # Verifier de teste que sempre aceita
 │   └── RejectingMockVerifier.sol  # Verifier de teste que sempre rejeita
-├── scripts/
-│   ├── deploy.js                  # Deploy dos contratos
-│   └── interact.js                # Demonstração end-to-end
 ├── test/
 │   ├── helpers/fixtures.js        # Fixtures e helpers compartilhados
 │   ├── deployment.test.js
@@ -27,7 +24,17 @@ pi-votacao-zk-blockchain/
 │   ├── lifecycle.test.js
 │   ├── cast-vote.test.js
 │   ├── zeresima.test.js
-│   └── results.test.js
+│   ├── results.test.js
+│   └── integration/
+│       ├── helpers/proof.js       # SnarkJS wrapper: witness + PLONK proof + calldata format
+│       └── e2e_real_proof.test.js # End-to-end com PlonkVerifier real
+├── scripts/
+│   ├── deploy.js                  # Deploy dos contratos
+│   ├── interact.js                # Demonstração end-to-end
+│   ├── bench_circuit.js           # Benchmark de geração de prova → bench-circuit.txt
+│   ├── sync_circuit_artifacts.sh  # Sincroniza Verifier.sol + zkey + vkey + CHECKSUMS
+│   ├── verify_checksums.sh        # Verifica sha256 contra scripts/artifacts/CHECKSUMS.txt
+│   └── artifacts/                 # Artefatos sincronizados do circuito (zkey, vkey, CHECKSUMS)
 ├── docs/IMPLEMENTATION_PLAN.md
 ├── hardhat.config.js
 └── package.json
@@ -119,13 +126,20 @@ Os artefatos são gerados em `artifacts/`.
 
 ## Testes
 
-A suíte de testes é escrita em **JavaScript** com **Hardhat 2 LTS + Mocha + Chai** (via `@nomicfoundation/hardhat-chai-matchers`).
+A suíte de testes é escrita em **JavaScript** com **Hardhat 2 LTS + Mocha + Chai** (via `@nomicfoundation/hardhat-chai-matchers`), usando `loadFixture` de `@nomicfoundation/hardhat-network-helpers` para snapshots/reverts entre testes.
 
-```bash
-npm test
-```
+Há **duas suítes cooperativas** que consomem os mesmos artefatos sincronizados do repositório `pi-votacao-zk-circuits`:
 
-A suíte cobre:
+| Comando                       | Suíte                                  | Verifier usado            | Tempo aprox. | Saída adicional       |
+|-------------------------------|----------------------------------------|---------------------------|--------------|-----------------------|
+| `npm test`                    | `test/*.test.js`                       | `MockVerifier`            | ~1.5 s       | —                     |
+| `npm run test:integration`    | `test/integration/*.test.js`           | **`PlonkVerifier` real**  | ~58 s        | —                     |
+| `npm run test:gas`            | `test/integration/*.test.js`           | **`PlonkVerifier` real**  | ~60 s        | `gas-report.txt`      |
+| `npm run bench:circuit`       | Script `scripts/bench_circuit.js`      | (off-chain SnarkJS)       | ~20 s        | `bench-circuit.txt`   |
+| `npm run verify:artifacts`    | Script de verificação sha256           | —                         | <1 s         | —                     |
+| `npm run sync:circuit`        | `scripts/sync_circuit_artifacts.sh`    | —                         | <2 s         | atualiza `Verifier.sol`, `voter_proof.zkey`, `verification_key.json`, `CHECKSUMS.txt` |
+
+A suíte **unitária** cobre:
 
 - Deploy e estado inicial
 - Setup admin (createElection, addCandidate, registerVoterHashes, setMerkleRoot)
@@ -134,11 +148,32 @@ A suíte cobre:
 - Voto branco (`candidateId=0`), voto nulo (`candidateId=999`)
 - `getZeresima`, `getResults`, `getRaceResults`
 
+A suíte **de integração** (`test/integration/e2e_real_proof.test.js`) gera **provas PLONK reais** com SnarkJS a partir de um witness real do circuito e as submete ao `castVote`. Cobre o conjunto exigido pela seção 4 do `.github/copilot-instructions.md` da raiz de integração: happy path, double-vote, cross-race uniqueness, relay-attack, wrong Merkle root, wrong election id, blank, null, election-state guard, results audit. Status atual: **10/10 passando**.
+
 Para cobertura:
 
 ```bash
 npm run test:coverage
 ```
+
+### Visualização (opcional)
+
+Da raiz do repositório `pi_votacao/`:
+
+```bash
+docker compose up -d        # Hardhat node em localhost:8545 + Otterscan em localhost:5100
+bash scripts/docker_smoke.sh   # 3 checks: eth_chainId, eth_blockNumber, Otterscan UI
+docker compose down            # tear down (estado é efêmero)
+```
+
+A suíte de testes **não** depende dessa stack — ela usa a in-process Hardhat network. O compose só serve para inspeção visual / demo.
+
+### Entregáveis acadêmicos
+
+- `gas-report.txt` — tabela de gas por método e por deploy (gerada por `test:gas`).
+  - Exemplo medido em 2026-04-23: `castVote` avg **374 076** gas (8 chamadas, min 348 369 / max 381 493); `PlonkVerifier` deploy **1 392 830** gas (2.3 % do block limit); `VotingContract` deploy **2 051 260** gas (3.4 %).
+- `bench-circuit.txt` — JSON com info do R1CS (3 143 constraints, 3 151 wires, bn128) e tempos de geração de prova (mediana ~3 462 ms em 3 runs).
+- `scripts/artifacts/CHECKSUMS.txt` — sha256 de `voter_proof.wasm`, `voter_proof.zkey`, `verification_key.json` e `Verifier.sol`. Verificado por `verify:artifacts` a cada sync.
 
 ---
 
@@ -188,9 +223,9 @@ VOTING_ADDRESS=0x... npm run interact:sepolia
 - **Sem auditoria formal.** O contrato implementa CEI estrito e usa `ReentrancyGuard` como defesa-em-profundidade, mas não passou por auditoria de terceiros.
 - **`registerVoterHashes` não é incremental.** A função pode ser chamada **uma única vez** por eleição (idempotência via `VoterHashesAlreadyRegistered`). Lotes parciais não são suportados nesta versão.
 - **Busca linear de candidatos.** `_incrementCandidateVote` percorre o array linearmente. Aceitável para 2 candidatos; para escalas maiores convém substituir por mapping.
-- **Custo de gás da verificação PLONK.** A verificação on-chain custa ~280k–400k gás por voto.
+- **Custo de gás da verificação PLONK.** Medido em 2026-04-23 com PlonkVerifier real: `castVote` avg **374 076** gas (min 348 369 / max 381 493 em 8 chamadas). Veja `gas-report.txt`.
 - **PoC monocargo.** Apenas `raceId = 0` é aceito. A estrutura de dados (`mapping(uint256 => mapping(uint256 => bool)) nullifiers`) já é multi-cargo, mas a lógica de cargo é restringida ao caso 0 nesta versão.
-- **Verifier ainda é placeholder.** O arquivo real será gerado pelo `pi-votacao-zk-circuits` e copiado neste repo.
+- **Verifier sincronizado.** O `contracts/Verifier.sol` é gerado pelo `pi-votacao-zk-circuits` e sincronizado por `npm run sync:circuit`, que também regenera e verifica `scripts/artifacts/CHECKSUMS.txt`.
 
 ---
 

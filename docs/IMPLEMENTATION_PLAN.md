@@ -449,9 +449,153 @@ Run: `npx hardhat run scripts/deploy.js --network localhost`
 
 ---
 
-## Phase 4 — Python Test Suite
+## Phase 4 — JavaScript Test Suite (Hardhat + Mocha + Chai)
 
-### 4.1 `tests/conftest.py`
+> **Doc-drift correction (2026-04-23):** This phase originally specified a `pytest + web3.py` suite. The
+> implementation actually shipped on **Hardhat + Mocha + Chai** (via `@nomicfoundation/hardhat-toolbox`), using
+> `loadFixture` from `@nomicfoundation/hardhat-network-helpers`. The reasons are recorded in
+> `pi-votacao-zk-blockchain/.github/copilot-instructions.md` (Section 5):
+>
+> 1. The integration boundary needs to drive a **real PLONK proof** through `castVote`. SnarkJS is a Node
+>    library; staying in Node avoids a cross-language proof-passing layer.
+> 2. `loadFixture` snapshots/reverts the EVM between tests and keeps the suite fast (~1.5s for 23 unit tests,
+>    ~58s for 10 integration tests including PLONK proof generation).
+> 3. `hardhat-gas-reporter` (bundled in the toolbox) gives us `gas-report.txt` for the academic deliverable
+>    without any extra wiring.
+>
+> The pytest spec below is preserved for historical context only — the **authoritative** suite is the JS one.
+
+### 4.1 Suite layout (actual)
+
+```
+test/
+  helpers/
+    fixtures.js                  # loadFixture builders: deployContracts, deployedWithRealVerifier, etc.
+  deployment.test.js             # constructor + initial state
+  admin-setup.test.js            # addRace, addCandidate, registerVoterHashes, setMerkleRoot
+  lifecycle.test.js              # PENDING → OPEN → FINISHED state machine
+  cast-vote.test.js              # castVote unit tests with MockVerifier (revert paths)
+  zeresima.test.js               # zero-knowledge of the initial state (zeresima check)
+  results.test.js                # getResults, getVoterHashes, getRaceCount
+  integration/
+    helpers/
+      proof.js                   # SnarkJS wrapper: generate witness + PLONK proof, format calldata
+    e2e_real_proof.test.js       # full path: real witness → real proof → castVote → state assertions
+```
+
+Two cooperating runs:
+
+| Command | Suite | Verifier | Purpose |
+|---|---|---|---|
+| `npm test` | `test/*.test.js` (excluding `integration/`) | `MockVerifier` / `RejectingMockVerifier` | Fast unit tests of contract logic and revert paths. |
+| `npm run test:integration` | `test/integration/*.test.js` | Real `PlonkVerifier` (synced from circuits repo) | End-to-end with real PLONK proofs. ~58s. |
+| `npm run test:gas` | `test/integration/*.test.js` with `REPORT_GAS=true` | Real `PlonkVerifier` | Generates `gas-report.txt`. |
+
+### 4.2 `test/helpers/fixtures.js` — pattern
+
+```javascript
+const { ethers } = require("hardhat");
+const { loadFixture } = require("@nomicfoundation/hardhat-network-helpers");
+
+async function deployContracts() {
+  const [admin, voter1, voter2, ...others] = await ethers.getSigners();
+  const Verifier = await ethers.getContractFactory("MockVerifier");
+  const verifier = await Verifier.deploy();
+  const Voting = await ethers.getContractFactory("VotingContract");
+  const voting = await Voting.deploy(
+    await verifier.getAddress(),
+    "Eleição de Teste",
+    "Descrição",
+    1n, // election_id
+  );
+  return { voting, verifier, admin, voter1, voter2, others };
+}
+
+async function withOpenElection() {
+  const ctx = await loadFixture(deployContracts);
+  await ctx.voting.connect(ctx.admin).addRace("Race 0");
+  await ctx.voting.connect(ctx.admin).addCandidate(0, "Alice", "13");
+  await ctx.voting.connect(ctx.admin).addCandidate(0, "Bob", "22");
+  await ctx.voting.connect(ctx.admin).registerVoterHashes([1n, 2n, 3n]);
+  await ctx.voting.connect(ctx.admin).setMerkleRoot(123456789n);
+  await ctx.voting.connect(ctx.admin).openElection();
+  return ctx;
+}
+
+module.exports = { deployContracts, withOpenElection };
+```
+
+### 4.3 Unit test pattern (`test/cast-vote.test.js` excerpt)
+
+```javascript
+const { expect } = require("chai");
+const { loadFixture } = require("@nomicfoundation/hardhat-network-helpers");
+const { withOpenElection } = require("./helpers/fixtures");
+
+describe("castVote — revert paths (MockVerifier)", () => {
+  it("reverts when merkle_root mismatches voterMerkleRoot", async () => {
+    const { voting, voter1 } = await loadFixture(withOpenElection);
+    const pub = [
+      999n,             // wrong merkle_root
+      0xabcdefn,        // nullifier
+      13n, 1n, 0n,      // candidate, election, race
+    ];
+    const proof = new Array(24).fill(0n);
+    await expect(voting.connect(voter1).castVote(0, pub, proof))
+      .to.be.revertedWith("Merkle root mismatch");
+  });
+  // ... InvalidElectionId, RaceIdMismatch, NullifierAlreadyUsed, InvalidProof
+});
+```
+
+### 4.4 Required revert-path coverage (boundary contract — Section 2 of integration root copilot-instructions)
+
+The check ordering inside `castVote` is fixed and tested in this order:
+
+1. `require(_raceId < raceCount, "Invalid race ID")`
+2. `require(_pubSignals[0] == voterMerkleRoot, "Merkle root mismatch")`
+3. `require(_pubSignals[3] == electionId, "Election ID mismatch")`
+4. `require(_pubSignals[4] == _raceId, "Race ID mismatch")`
+5. `require(!nullifierUsed[_raceId][_pubSignals[1]], "Nullifier already used")`
+6. `require(verifier.verifyProof(_proof, _pubSignals), "Invalid proof")`
+
+Tests must cover each with a tightly scoped fixture and assert the exact revert string.
+
+### 4.5 Integration test pattern (`test/integration/e2e_real_proof.test.js` excerpt)
+
+```javascript
+const { expect } = require("chai");
+const { loadFixture } = require("@nomicfoundation/hardhat-network-helpers");
+const { generateProof } = require("./helpers/proof");
+const { withOpenElectionRealVerifier } = require("../helpers/fixtures");
+
+describe("e2e — real PLONK proof through castVote", () => {
+  it("happy path: registered voter casts a valid vote", async () => {
+    const { voting, voter1, merkleTree, voterSecrets } =
+      await loadFixture(withOpenElectionRealVerifier);
+    const { proof, pubSignals } = await generateProof({
+      voter_id: voterSecrets[0].id,
+      voter_secret: voterSecrets[0].secret,
+      election_id: 1n,
+      race_id: 0n,
+      candidate_id: 13n,
+      merkle_path: merkleTree.pathFor(0),
+      merkle_indices: merkleTree.indicesFor(0),
+    });
+    await expect(voting.connect(voter1).castVote(0, pubSignals, proof))
+      .to.emit(voting, "VoteCast")
+      .withArgs(0, pubSignals[1] /* nullifier */, pubSignals[2] /* candidate */);
+  });
+  // ... double-vote, multi-race uniqueness, relay attack, wrong root, wrong election, blank, null
+});
+```
+
+### 4.6 Historical pytest spec (preserved, NOT used)
+
+The original Python spec is preserved below for reference. **Do not implement it.** It described `tests/conftest.py`, `tests/test_deployment.py`, `tests/test_voter_registration.py`, `tests/test_state_machine.py`, `tests/test_cast_vote.py`, and `tests/test_results.py`. The corresponding JS files live in `test/` as listed in 4.1 above and are the only ones executed by CI / `npm test`.
+
+<details>
+<summary>Click to expand the historical pytest spec (kept for traceability)</summary>
 
 ```python
 import json
@@ -786,6 +930,8 @@ def test_nullifier_not_used_initially(open_election):
     assert open_election.functions.isNullifierUsed(0, 12345).call() is False
 ```
 
+</details>
+
 ---
 
 ## Phase 5 — Sepolia Deployment
@@ -805,36 +951,47 @@ Update `.env` with the deployed `CONTRACT_ADDRESS`. Log both addresses in `SESSI
 
 ---
 
-## Phase 6 — README Documentation
+## Phase 6 — README & deliverables
 
 The `README.md` must contain:
 
-1. **Prerequisites:** Node.js ≥ 18, Python ≥ 3.11, pip, npm
-2. **Setup:** install Node deps, install Python deps, compile contracts
-3. **Running the local node:** `npx hardhat node`
-4. **Deploying locally:** `npx hardhat run scripts/deploy.js --network localhost`
-5. **Running tests:** `pytest tests/ -v` (with Hardhat node running)
-6. **Contract architecture:** table of storage variables and their roles
-7. **Public signals reference:** the 5-element order and what each means
-8. **Declared limitations:** CEI but no formal audit; `registerVoterHashes` not atomic; candidate number uniqueness not enforced on-chain; PLONK verification ~300k–400k gas
+1. **Prerequisites:** Node.js ≥ 20, npm ≥ 10, Docker (optional, only for the visualization stack).
+2. **Setup:** `npm install`, `npm run sync:circuit` (pulls fresh `Verifier.sol` + `voter_proof.zkey` + `verification_key.json` + `CHECKSUMS.txt` from `pi-votacao-zk-circuits/build/` and verifies sha256).
+3. **Local node:** `npx hardhat node` — or `docker compose up -d` from the repo root for the Hardhat node + Otterscan visualization stack.
+4. **Deploy locally:** `npx hardhat run scripts/deploy.js --network localhost`.
+5. **Run tests:**
+   - `npm test` — fast unit suite (MockVerifier).
+   - `npm run test:integration` — end-to-end with real PLONK proofs (~58s).
+   - `npm run test:gas` — same as integration, additionally writes `gas-report.txt`.
+   - `npm run bench:circuit` — N PLONK proofs + R1CS info, writes `bench-circuit.txt` JSON.
+   - `npm run verify:artifacts` — re-checks sha256 against `scripts/artifacts/CHECKSUMS.txt`.
+   - `npm run smoke:docker` (root script) — 3-check smoke against the docker-compose stack.
+6. **Contract architecture:** table of storage variables and their roles.
+7. **Public signals reference:** the 5-element order — `[merkle_root, nullifier_hash, candidate_id, election_id, race_id]`.
+8. **Academic deliverables produced by this repo:**
+   - `gas-report.txt` — gas table for every method + deployment.
+   - `bench-circuit.txt` — proof-generation timing and R1CS shape.
+   - `scripts/artifacts/CHECKSUMS.txt` — sha256 of `voter_proof.wasm`, `voter_proof.zkey`, `verification_key.json`, `Verifier.sol`.
+9. **Declared limitations:** CEI but no formal audit; `registerVoterHashes` not atomic; candidate number uniqueness not enforced on-chain; PLONK verification ~348k–381k gas (`castVote` avg 374k measured 2026-04-23).
 
 ---
 
 ## Completion Checklist
 
-- [ ] `IVerifier.sol` interface matches the actual `Verifier.sol` signature
-- [ ] `VotingContract.sol` compiles without errors or warnings
-- [ ] `castVote` follows strict CEI — nullifier written before `emit VoteCast`
-- [ ] All state transitions enforced by `inState` modifier
-- [ ] All admin functions protected by `onlyAdmin` modifier
-- [ ] `npx hardhat compile` produces clean output
-- [ ] All non-skipped pytest tests pass: `pytest tests/ -v`
-- [ ] `test_cast_vote.py` covers: invalid proof, Merkle root mismatch, election ID mismatch, race ID mismatch, wrong state
-- [ ] `test_state_machine.py` covers: open, close, cannot reopen, cannot open without Merkle root
-- [ ] Valid proof fixture integration tests written (unblocked after circuits repo is complete)
-- [ ] Sepolia deployment successful and `CONTRACT_ADDRESS` in `.env`
-- [ ] Contract addresses logged in `SESSION_LOG.md`
-- [ ] README documented with reproduction steps
+- [x] `IVerifier.sol` interface matches the actual `Verifier.sol` signature
+- [x] `VotingContract.sol` compiles without errors or warnings
+- [x] `castVote` follows strict CEI — nullifier written before `emit VoteCast`
+- [x] All state transitions enforced by `inState` modifier
+- [x] All admin functions protected by `onlyAdmin` modifier
+- [x] `npx hardhat compile` produces clean output
+- [x] `npm test` (unit suite) green
+- [x] `npm run test:integration` (real PLONK suite) green — 10/10
+- [x] `npm run test:gas` writes `gas-report.txt`
+- [x] `npm run bench:circuit` writes `bench-circuit.txt`
+- [x] `scripts/sync_circuit_artifacts.sh` regenerates and verifies `CHECKSUMS.txt`
+- [x] Revert paths covered: `InvalidRaceId`, `InvalidMerkleRoot`, `InvalidElectionId`, `RaceIdMismatch`, `NullifierAlreadyUsed`, `InvalidProof`, `WrongState`
+- [x] Docker compose visualization (Hardhat node + Otterscan) defined at repo root
+- [ ] Sepolia deployment successful and `CONTRACT_ADDRESS` in `.env` (post-defense)
 
 ---
 
@@ -842,13 +999,12 @@ The `README.md` must contain:
 
 | Problem | Likely Cause | Action |
 |---|---|---|
-| `AssertionError: Hardhat node is not running` | Hardhat process not started | Run `npx hardhat node` in a separate terminal |
-| `FileNotFoundError: Artifact not found` | Contracts not compiled | Run `npx hardhat compile` |
-| `ContractLogicError` on valid proof | `IVerifier.sol` interface mismatch | Check `verifyProof` signature against actual `Verifier.sol` |
-| `Merkle root mismatch` in tests | Test fixture using wrong root value | Use `open_election.functions.voterMerkleRoot().call()` to read on-chain value |
-| `process_receipt` returns empty list | Wrong event name or ABI mismatch | Recompile and reload artifact; verify event name matches exactly |
-| Skipped valid-proof tests | Proof fixtures not generated yet | Complete Phase 5 of `pi-votacao-zk-circuits` first |
+| Integration test fails with `Invalid proof` | Circuit was rebuilt but `Verifier.sol` / `voter_proof.zkey` not re-synced | Run `npm run sync:circuit`; `verify:artifacts` must show all sha256 OK |
+| `npm run test:gas` shows no table | `REPORT_GAS=true` not exported | The `test:gas` script sets it; if you ran `npm test` instead, no table is emitted by design |
+| `bench-circuit.txt` write fails with `Invalid string length` | `snarkjs.r1cs.info()` `curve` object contains huge BigInt buffers | Already fixed: `bench_circuit.js` strips to `curve.name` only |
+| Docker smoke fails on Otterscan check | UI container slow to start | Re-run `bash scripts/docker_smoke.sh` after a few seconds; Otterscan is browser-side and only needs the Hardhat node reachable on `localhost:8545` |
+| `CHECKSUMS.txt` mismatch after sync | Circuit source changed but build wasn't rerun in circuits repo | In `pi-votacao-zk-circuits/`, run `make artifacts` (which runs `make checksums`); then re-sync from this repo |
 
 ---
 
-*Generated: 2026-04-17 | Based on project spec v4.0*
+*Generated: 2026-04-17 | Phase 4/6 + checklist + known-issues rewritten 2026-04-23 to reflect actual Hardhat+Mocha+Chai suite, gas reporter, circuit bench, and CHECKSUMS provenance chain. Based on project spec v4.0.*
