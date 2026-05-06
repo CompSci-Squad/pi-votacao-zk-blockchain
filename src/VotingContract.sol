@@ -71,6 +71,29 @@ contract VotingContract is ReentrancyGuard {
     uint256 public nullVotes;
     uint256 public totalVotes;
 
+    // ─────────────────── Multi-race extension (additive) ────────────────────
+    //
+    // Race 0 keeps using the legacy single-race storage above (`candidates`,
+    // `blankVotes`, `nullVotes`, `totalVotes`, `candidateNumberUsed`,
+    // `nullifiers[0]`). This preserves the existing public ABI / storage
+    // layout used by all current tests and scripts.
+    //
+    // Races 1, 2, ...  live in `extraRaces`. `racesCount()` returns the total
+    // number of registered races (always ≥ 1 — race 0 always exists).
+
+    string public race0Name;
+
+    struct Race {
+        string name;
+        Candidate[] candidates;
+        mapping(uint256 => bool) candidateNumberUsed;
+        uint256 blankVotes;
+        uint256 nullVotes;
+        uint256 totalVotes;
+    }
+    mapping(uint256 => Race) internal extraRaces;
+    uint256 public extraRacesCount;
+
     // ───────────────────────────── Constants ────────────────────────────────
 
     /// @notice Candidate ID representing a blank vote (voto branco)
@@ -79,13 +102,19 @@ contract VotingContract is ReentrancyGuard {
     uint256 public constant NULL_VOTE  = 999;
     /// @notice Maximum number of registered voters (Merkle depth 4 → 2^4 = 16 leaves)
     uint256 public constant MAX_VOTERS = 16;
-    /// @notice Canonical raceId for this single-race PoC. Multi-race is a future iteration.
-    uint256 public constant POC_RACE_ID = 0;
 
     // ──────────────────────────────── Events ────────────────────────────────
 
     event ElectionCreated(string name, uint256 electionId);
     event CandidateAdded(uint256 indexed id, string name, uint256 number);
+    event RaceAdded(uint256 indexed raceId, string name);
+    event Race0Named(string name);
+    event CandidateAddedToRace(
+        uint256 indexed raceId,
+        uint256 indexed id,
+        string name,
+        uint256 number
+    );
     event VoterHashesRegistered(uint256[] hashes);
     event MerkleRootSet(uint256 root);
     event ElectionOpened(uint256 timestamp, uint256 electionId);
@@ -183,6 +212,71 @@ contract VotingContract is ReentrancyGuard {
     }
 
     /**
+     * @notice Set the human-readable name of race 0 (the legacy single-race slot).
+     * @dev Race 0 always exists and uses the legacy storage. Other races are
+     *      created via {addRace}. May only be called once while PENDING.
+     */
+    function setRace0Name(string calldata _name)
+        external
+        onlyAdmin
+        inState(ElectionState.PENDING)
+    {
+        race0Name = _name;
+        emit Race0Named(_name);
+    }
+
+    /**
+     * @notice Register an additional race (raceId ≥ 1). Race 0 is implicit and
+     *         always exists — this function is only for races 1, 2, ...
+     * @param _name Human-readable race name (e.g. "Governador").
+     * @return raceId The id of the newly created race.
+     */
+    function addRace(string calldata _name)
+        external
+        onlyAdmin
+        inState(ElectionState.PENDING)
+        returns (uint256 raceId)
+    {
+        extraRacesCount++;
+        raceId = extraRacesCount; // 1, 2, 3, ...
+        extraRaces[raceId].name = _name;
+        emit RaceAdded(raceId, _name);
+    }
+
+    /**
+     * @notice Add a candidate to a specific race. Race 0 routes to the legacy
+     *         storage so existing scripts/tests keep working unchanged.
+     */
+    function addCandidateToRace(
+        uint256 raceId,
+        string calldata _name,
+        string calldata _party,
+        uint256 _number
+    ) external onlyAdmin inState(ElectionState.PENDING) {
+        if (raceId == 0) {
+            if (candidateNumberUsed[_number]) revert CandidateNumberAlreadyUsed(_number);
+            candidateNumberUsed[_number] = true;
+            uint256 id = candidates.length + 1;
+            candidates.push(Candidate(id, _name, _party, _number, 0));
+            emit CandidateAdded(id, _name, _number);
+            emit CandidateAddedToRace(0, id, _name, _number);
+        } else {
+            if (raceId > extraRacesCount) revert InvalidRaceId(raceId);
+            Race storage r = extraRaces[raceId];
+            if (r.candidateNumberUsed[_number]) revert CandidateNumberAlreadyUsed(_number);
+            r.candidateNumberUsed[_number] = true;
+            uint256 id = r.candidates.length + 1;
+            r.candidates.push(Candidate(id, _name, _party, _number, 0));
+            emit CandidateAddedToRace(raceId, id, _name, _number);
+        }
+    }
+
+    /// @notice Total number of registered races (race 0 always counts).
+    function racesCount() public view returns (uint256) {
+        return 1 + extraRacesCount;
+    }
+
+    /**
      * @notice Register the voter identity hashes for public auditability.
      * @dev Idempotency: reverts if hashes are already registered to prevent
      *      accidental overwrite. Maximum MAX_VOTERS (16) entries. All hashes
@@ -246,7 +340,7 @@ contract VotingContract is ReentrancyGuard {
      *
      *        CHECKS:
      *          1. Election is OPEN (modifier).
-     *          2. raceId == POC_RACE_ID (single-race PoC).
+     *          2. raceId is registered (raceId == 0 OR raceId <= extraRacesCount).
      *          3. pubSignals[0] (merkle_root) matches on-chain voterMerkleRoot.
      *          4. pubSignals[3] (election_id) matches currentElectionId.
      *          5. pubSignals[4] (race_id)    matches the raceId function param.
@@ -264,7 +358,7 @@ contract VotingContract is ReentrancyGuard {
      *      `nonReentrant` provides defence-in-depth in case the verifier
      *      address is ever swapped for a non-trusted implementation.
      *
-     * @param raceId      Race identifier — must equal POC_RACE_ID (0) in this PoC.
+     * @param raceId      Race identifier — 0 (default) or 1..extraRacesCount.
      * @param pubSignals  [merkle_root, nullifier_hash, candidate_id, election_id, race_id]
      * @param proof       PLONK proof — 24 field elements as emitted by
      *                    `snarkjs.plonk.exportSolidityCallData` and consumed
@@ -276,7 +370,7 @@ contract VotingContract is ReentrancyGuard {
         uint256[24] calldata proof
     ) external nonReentrant inState(ElectionState.OPEN) {
         // ── CHECKS ────────────────────────────────────────────────────────
-        if (raceId != POC_RACE_ID) revert InvalidRaceId(raceId);
+        if (raceId > extraRacesCount) revert InvalidRaceId(raceId);
 
         uint256 merkleRoot  = pubSignals[0];
         uint256 nullifier   = pubSignals[1];
@@ -300,16 +394,30 @@ contract VotingContract is ReentrancyGuard {
         // ── EFFECTS ───────────────────────────────────────────────────────
         // 🔒 Nullifier MUST be written before any event emission.
         nullifiers[raceId][nullifier] = true;
-        totalVotes++;
 
-        if (candidateId == BLANK_VOTE) {
-            blankVotes++;
-        } else if (candidateId == NULL_VOTE) {
-            nullVotes++;
+        if (raceId == 0) {
+            totalVotes++;
+            if (candidateId == BLANK_VOTE) {
+                blankVotes++;
+            } else if (candidateId == NULL_VOTE) {
+                nullVotes++;
+            } else {
+                if (candidateId == 0 || candidateId > candidates.length)
+                    revert CandidateNotFound(candidateId);
+                candidates[candidateId - 1].voteCount++;
+            }
         } else {
-            if (candidateId == 0 || candidateId > candidates.length)
-                revert CandidateNotFound(candidateId);
-            candidates[candidateId - 1].voteCount++;
+            Race storage r = extraRaces[raceId];
+            r.totalVotes++;
+            if (candidateId == BLANK_VOTE) {
+                r.blankVotes++;
+            } else if (candidateId == NULL_VOTE) {
+                r.nullVotes++;
+            } else {
+                if (candidateId == 0 || candidateId > r.candidates.length)
+                    revert CandidateNotFound(candidateId);
+                r.candidates[candidateId - 1].voteCount++;
+            }
         }
 
         // ── INTERACTIONS ──────────────────────────────────────────────────
@@ -396,11 +504,27 @@ contract VotingContract is ReentrancyGuard {
             uint256 _totalVotes
         )
     {
-        if (raceId != POC_RACE_ID) revert InvalidRaceId(raceId);
-        _candidates = candidates;
-        _blankVotes = blankVotes;
-        _nullVotes  = nullVotes;
-        _totalVotes = totalVotes;
+        if (raceId == 0) {
+            _candidates = candidates;
+            _blankVotes = blankVotes;
+            _nullVotes  = nullVotes;
+            _totalVotes = totalVotes;
+        } else if (raceId <= extraRacesCount) {
+            Race storage r = extraRaces[raceId];
+            _candidates = r.candidates;
+            _blankVotes = r.blankVotes;
+            _nullVotes  = r.nullVotes;
+            _totalVotes = r.totalVotes;
+        } else {
+            revert InvalidRaceId(raceId);
+        }
+    }
+
+    /// @notice Return the human-readable name of a race.
+    function getRaceName(uint256 raceId) external view returns (string memory) {
+        if (raceId == 0) return race0Name;
+        if (raceId <= extraRacesCount) return extraRaces[raceId].name;
+        revert InvalidRaceId(raceId);
     }
 
     /**
@@ -426,8 +550,9 @@ contract VotingContract is ReentrancyGuard {
         view
         returns (Candidate[] memory)
     {
-        if (raceId != POC_RACE_ID) revert InvalidRaceId(raceId);
-        return candidates;
+        if (raceId == 0) return candidates;
+        if (raceId <= extraRacesCount) return extraRaces[raceId].candidates;
+        revert InvalidRaceId(raceId);
     }
 
     /**
@@ -451,7 +576,120 @@ contract VotingContract is ReentrancyGuard {
         view
         returns (bool)
     {
-        if (raceId != POC_RACE_ID) revert InvalidRaceId(raceId);
+        if (raceId > extraRacesCount) revert InvalidRaceId(raceId);
         return nullifiers[raceId][nullifier];
+    }
+
+    // ────────────────────── Multi-race audit views (BU / Zerésima) ──────────────────────
+
+    struct RaceSnapshot {
+        uint256 raceId;
+        string name;
+        Candidate[] candidates;
+        uint256 blankVotes;
+        uint256 nullVotes;
+        uint256 totalVotes;
+    }
+
+    /**
+     * @notice Multi-race zerésima — attests that every race has zero votes
+     *         before the election is opened. Restricted to PENDING.
+     * @return _electionName    Name of the election.
+     * @return _electionId      Election ID.
+     * @return snapshots        One RaceSnapshot per registered race.
+     * @return voterCount       Number of registered voter hashes.
+     * @return _merkleRoot      Voter Merkle root.
+     * @return allZero          True iff every counter is zero.
+     * @return _blockTimestamp  Block timestamp of the snapshot.
+     * @return _blockNumber     Block number of the snapshot.
+     */
+    function getZeresimaMultiRace()
+        external
+        view
+        inState(ElectionState.PENDING)
+        returns (
+            string memory _electionName,
+            uint256 _electionId,
+            RaceSnapshot[] memory snapshots,
+            uint256 voterCount,
+            uint256 _merkleRoot,
+            bool allZero,
+            uint256 _blockTimestamp,
+            uint256 _blockNumber
+        )
+    {
+        _electionName   = electionName;
+        _electionId     = currentElectionId;
+        voterCount      = voterHashes.length;
+        _merkleRoot     = voterMerkleRoot;
+        _blockTimestamp = block.timestamp;
+        _blockNumber    = block.number;
+        snapshots       = _allRaceSnapshots();
+
+        allZero = true;
+        uint256 n = snapshots.length;
+        for (uint256 i = 0; i < n; i++) {
+            if (snapshots[i].totalVotes > 0) { allZero = false; break; }
+        }
+    }
+
+    /**
+     * @notice Multi-race Boletim de Urna (BU) — final tallies for every race.
+     *         Available in any state but semantically meant to be called
+     *         after {closeElection} (see SESSION_REPORT for procedure).
+     */
+    function getBoletimUrna()
+        external
+        view
+        returns (
+            string memory _electionName,
+            uint256 _electionId,
+            uint8 _state,
+            RaceSnapshot[] memory snapshots,
+            uint256 voterCount,
+            uint256 _merkleRoot,
+            uint256 grandTotalVotes,
+            uint256 _blockTimestamp,
+            uint256 _blockNumber
+        )
+    {
+        _electionName   = electionName;
+        _electionId     = currentElectionId;
+        _state          = uint8(state);
+        voterCount      = voterHashes.length;
+        _merkleRoot     = voterMerkleRoot;
+        _blockTimestamp = block.timestamp;
+        _blockNumber    = block.number;
+        snapshots       = _allRaceSnapshots();
+
+        for (uint256 i = 0; i < snapshots.length; i++) {
+            grandTotalVotes += snapshots[i].totalVotes;
+        }
+    }
+
+    function _allRaceSnapshots() internal view returns (RaceSnapshot[] memory snapshots) {
+        uint256 n = 1 + extraRacesCount;
+        snapshots = new RaceSnapshot[](n);
+
+        snapshots[0] = RaceSnapshot({
+            raceId: 0,
+            name: race0Name,
+            candidates: candidates,
+            blankVotes: blankVotes,
+            nullVotes: nullVotes,
+            totalVotes: totalVotes
+        });
+
+        for (uint256 i = 1; i < n; i++) {
+            Race storage r = extraRaces[i];
+            snapshots[i] = RaceSnapshot({
+                raceId: i,
+                name: r.name,
+                candidates: r.candidates,
+                blankVotes: r.blankVotes,
+                nullVotes: r.nullVotes,
+                totalVotes: r.totalVotes
+            });
+        }
     }
 }

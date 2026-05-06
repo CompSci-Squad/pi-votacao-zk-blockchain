@@ -1,0 +1,125 @@
+{
+  "kind": "rdv",
+  "electionName": "Eleição PoC pi_votacao",
+  "electionId": "1",
+  "contractAddress": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+  "rpcUrl": "http://127.0.0.1:8545",
+  "capturedAt": {
+    "blockNumber": "27",
+    "isoUTC": "2026-05-06T02:16:55.775Z"
+  },
+  "totalBallots": "9",
+  "sortKey": "keccak256(nullifier || raceId), ascending",
+  "ballots": [
+    {
+      "raceId": "0",
+      "candidateId": "1",
+      "nullifier": "0x0467b94fc0913a2eb9f97927acaf7533920b28e372d517c40fcf6d93c8847a88",
+      "sortTag": "0x01937da396423f00daf4edfcf7c163abf7a70e6993232b6fc7baec6e8c987082"
+    },
+    {
+      "raceId": "0",
+      "candidateId": "999",
+      "nullifier": "0x1da9cda42c4037299879d72e2f8d8ce77657d10aeb70ac9e2101b1d226ba4cea",
+      "sortTag": "0x736669bab0e7b287358eac67a29ac92a4ed3ab582aafc2612861fb011f247195"
+    },
+    {
+      "raceId": "2",
+      "candidateId": "3",
+      "nullifier": "0x07c20ba417eb7f8db7d99c134bfe8ac770d414470b82360b9f4d4caac413df2c",
+      "sortTag": "0x9742398844da0eb4ef5812cc743aabc058a0eb9ed353d628cbfc4f50a438edc0"
+    },
+    {
+      "raceId": "0",
+      "candidateId": "2",
+      "nullifier": "0x10916e072a59ac7c4fb90cf85e34879980c4dc523122723a3f29e16ba2e3a62b",
+      "sortTag": "0xa214a0333b11b64795a3a73bf1be30029c6aeddcea7f49eb02a2d1d731ded89d"
+    },
+    {
+      "raceId": "1",
+      "candidateId": "1",
+      "nullifier": "0x128426c8a16ffa11f5d0c75393c6942cbf9fe6afd846c2e092b7ea08da5de957",
+      "sortTag": "0xc15a627f408f6345c66ef1de698e4b3e55e2ed6b65b6c28d19c419cee4a38fdf"
+    },
+    {
+      "raceId": "2",
+      "candidateId": "0",
+      "nullifier": "0x1ad2e451df11dccd91c6badeb5513460ebc0758f3076565f1c191e4fc0ed1b3d",
+      "sortTag": "0xcd07b2ad90169f8fbf51a408fd58db9af6646647a13e2df505df00be995da0c4"
+    },
+    {
+      "raceId": "1",
+      "candidateId": "3",
+      "nullifier": "0x2c805cdc1f0d1f94818e513630552ae83da71740711dd1596a706ca8cd53ea3f",
+      "sortTag": "0xd99c47cfc9aa7d0ff2b79fabccbcd6c56fe5bef0a43ea79ed3ff45d10025f6d9"
+    },
+    {
+      "raceId": "1",
+      "candidateId": "3",
+      "nullifier": "0x1d07a87ce84411aa39019c7ce78275a15c0d8d4d160752397e4d924c176b7910",
+      "sortTag": "0xdc3572db6b882f874990a2600d4d26ed2f4ae804467ae1ff43d2dc218f4807bb"
+    },
+    {
+      "raceId": "2",
+      "candidateId": "2",
+      "nullifier": "0x0eff35df2547c2245deb3319520a486b50b2c77613077f22784e1f7e247fb0b7",
+      "sortTag": "0xebdb429a769ef9b740ea9d2539160de5b6fd9758f6c1fc93548df9ca7ec4905a"
+    }
+  ],
+  "aggregates": [
+    {
+      "raceId": "0",
+      "totalBallots": "3",
+      "perCandidate": [
+        {
+          "candidateId": "1",
+          "count": "1"
+        },
+        {
+          "candidateId": "2",
+          "count": "1"
+        },
+        {
+          "candidateId": "999",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "raceId": "2",
+      "totalBallots": "3",
+      "perCandidate": [
+        {
+          "candidateId": "0",
+          "count": "1"
+        },
+        {
+          "candidateId": "2",
+          "count": "1"
+        },
+        {
+          "candidateId": "3",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "raceId": "1",
+      "totalBallots": "3",
+      "perCandidate": [
+        {
+          "candidateId": "1",
+          "count": "1"
+        },
+        {
+          "candidateId": "3",
+          "count": "2"
+        }
+      ]
+    }
+  ],
+  "_integrity": {
+    "algo": "sha256",
+    "canonical_sha256": "8335cca95611b3fddabf2ffcab2b6274206a224f08c3b8fc3a4042efa8f5895c"
+  }
+}

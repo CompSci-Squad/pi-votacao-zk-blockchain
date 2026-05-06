@@ -1,0 +1,177 @@
+
+src/VotingContract.sol
+
+║ Line     │ Column   │ Type     │ Message                                                │ Rule ID              ║
+╟──────────┼──────────┼──────────┼────────────────────────────────────────────────────────┼──────────────────────╢
+║ 4        │ 1        │ warning  │ Import in src/VotingContract.sol doesn't exist in:     │ import-path-check    ║
+║          │          │          │ @openzeppelin/contracts/utils/ReentrancyGuard.sol      │                      ║
+║ 35       │ 1        │ warning  │ Contract has 17 states declarations but allowed no     │ max-states-count     ║
+║          │          │          │ more than 15                                           │                      ║
+║ 35       │ 1        │ warning  │ Missing @author tag in contract 'VotingContract'       │ use-natspec          ║
+║ 38       │ 5        │ warning  │ Missing @notice tag in variable 'electionName'         │ use-natspec          ║
+║ 39       │ 5        │ warning  │ Missing @notice tag in variable                        │ use-natspec          ║
+║          │          │          │ 'electionDescription'                                  │                      ║
+║ 40       │ 5        │ warning  │ Missing @notice tag in variable 'admin'                │ use-natspec          ║
+║ 47       │ 5        │ warning  │ Missing @notice tag in variable 'state'                │ use-natspec          ║
+║ 49       │ 5        │ warning  │ Missing @notice tag in variable 'verifier'             │ use-natspec          ║
+║ 51       │ 5        │ warning  │ Missing @notice tag in variable                        │ use-natspec          ║
+║          │          │          │ 'currentElectionId'                                    │                      ║
+║ 52       │ 5        │ warning  │ Missing @notice tag in variable 'voterMerkleRoot'      │ use-natspec          ║
+║ 53       │ 5        │ warning  │ Missing @notice tag in variable 'voterHashes'          │ use-natspec          ║
+║ 69       │ 5        │ warning  │ Missing @notice tag in variable 'candidates'           │ use-natspec          ║
+║ 70       │ 5        │ warning  │ Missing @notice tag in variable 'blankVotes'           │ use-natspec          ║
+║ 71       │ 5        │ warning  │ Missing @notice tag in variable 'nullVotes'            │ use-natspec          ║
+║ 72       │ 5        │ warning  │ Missing @notice tag in variable 'totalVotes'           │ use-natspec          ║
+║ 84       │ 5        │ warning  │ Missing @notice tag in variable 'race0Name'            │ use-natspec          ║
+║ 95       │ 5        │ warning  │ Missing @notice tag in variable 'extraRacesCount'      │ use-natspec          ║
+║ 108      │ 5        │ warning  │ Missing @notice tag in event 'ElectionCreated'         │ use-natspec          ║
+║ 108      │ 5        │ warning  │ Missing @param tag in event 'ElectionCreated'          │ use-natspec          ║
+║ 108      │ 5        │ warning  │ Mismatch in @param names for event                     │ use-natspec          ║
+║          │          │          │ 'ElectionCreated'. Expected: [name, electionId],       │                      ║
+║          │          │          │ Found: []                                              │                      ║
+║ 108      │ 5        │ warning  │ GC: [electionId] on Event [ElectionCreated] could      │ gas-indexed-events   ║
+║          │          │          │ be Indexed                                             │                      ║
+║ 109      │ 5        │ warning  │ Missing @notice tag in event 'CandidateAdded'          │ use-natspec          ║
+║ 109      │ 5        │ warning  │ Missing @param tag in event 'CandidateAdded'           │ use-natspec          ║
+║ 109      │ 5        │ warning  │ Mismatch in @param names for event                     │ use-natspec          ║
+║          │          │          │ 'CandidateAdded'. Expected: [id, name, number],        │                      ║
+║          │          │          │ Found: []                                              │                      ║
+║ 109      │ 5        │ warning  │ GC: [number] on Event [CandidateAdded] could be        │ gas-indexed-events   ║
+║          │          │          │ Indexed                                                │                      ║
+║ 110      │ 5        │ warning  │ Missing @notice tag in event 'RaceAdded'               │ use-natspec          ║
+║ 110      │ 5        │ warning  │ Missing @param tag in event 'RaceAdded'                │ use-natspec          ║
+║ 110      │ 5        │ warning  │ Mismatch in @param names for event 'RaceAdded'.        │ use-natspec          ║
+║          │          │          │ Expected: [raceId, name], Found: []                    │                      ║
+║ 111      │ 5        │ warning  │ Missing @notice tag in event 'Race0Named'              │ use-natspec          ║
+║ 111      │ 5        │ warning  │ Missing @param tag in event 'Race0Named'               │ use-natspec          ║
+║ 111      │ 5        │ warning  │ Mismatch in @param names for event 'Race0Named'.       │ use-natspec          ║
+║          │          │          │ Expected: [name], Found: []                            │                      ║
+║ 112      │ 5        │ warning  │ Missing @notice tag in event                           │ use-natspec          ║
+║          │          │          │ 'CandidateAddedToRace'                                 │                      ║
+║ 112      │ 5        │ warning  │ Missing @param tag in event 'CandidateAddedToRace'     │ use-natspec          ║
+║ 112      │ 5        │ warning  │ Mismatch in @param names for event                     │ use-natspec          ║
+║          │          │          │ 'CandidateAddedToRace'. Expected: [raceId, id,         │                      ║
+║          │          │          │ name, number], Found: []                               │                      ║
+║ 112      │ 5        │ warning  │ GC: [number] on Event [CandidateAddedToRace] could     │ gas-indexed-events   ║
+║          │          │          │ be Indexed                                             │                      ║
+║ 118      │ 5        │ warning  │ Missing @notice tag in event                           │ use-natspec          ║
+║          │          │          │ 'VoterHashesRegistered'                                │                      ║
+║ 118      │ 5        │ warning  │ Missing @param tag in event                            │ use-natspec          ║
+║          │          │          │ 'VoterHashesRegistered'                                │                      ║
+║ 118      │ 5        │ warning  │ Mismatch in @param names for event                     │ use-natspec          ║
+║          │          │          │ 'VoterHashesRegistered'. Expected: [hashes],           │                      ║
+║          │          │          │ Found: []                                              │                      ║
+║ 119      │ 5        │ warning  │ Missing @notice tag in event 'MerkleRootSet'           │ use-natspec          ║
+║ 119      │ 5        │ warning  │ Missing @param tag in event 'MerkleRootSet'            │ use-natspec          ║
+║ 119      │ 5        │ warning  │ Mismatch in @param names for event                     │ use-natspec          ║
+║          │          │          │ 'MerkleRootSet'. Expected: [root], Found: []           │                      ║
+║ 119      │ 5        │ warning  │ GC: [root] on Event [MerkleRootSet] could be           │ gas-indexed-events   ║
+║          │          │          │ Indexed                                                │                      ║
+║ 120      │ 5        │ warning  │ Missing @notice tag in event 'ElectionOpened'          │ use-natspec          ║
+║ 120      │ 5        │ warning  │ Missing @param tag in event 'ElectionOpened'           │ use-natspec          ║
+║ 120      │ 5        │ warning  │ Mismatch in @param names for event                     │ use-natspec          ║
+║          │          │          │ 'ElectionOpened'. Expected: [timestamp,                │                      ║
+║          │          │          │ electionId], Found: []                                 │                      ║
+║ 120      │ 5        │ warning  │ GC: [timestamp] on Event [ElectionOpened] could be     │ gas-indexed-events   ║
+║          │          │          │ Indexed                                                │                      ║
+║ 120      │ 5        │ warning  │ GC: [electionId] on Event [ElectionOpened] could       │ gas-indexed-events   ║
+║          │          │          │ be Indexed                                             │                      ║
+║ 121      │ 5        │ warning  │ Missing @notice tag in event 'VoteCast'                │ use-natspec          ║
+║ 121      │ 5        │ warning  │ Missing @param tag in event 'VoteCast'                 │ use-natspec          ║
+║ 121      │ 5        │ warning  │ Mismatch in @param names for event 'VoteCast'.         │ use-natspec          ║
+║          │          │          │ Expected: [nullifier, raceId, candidateId], Found:     │                      ║
+║          │          │          │ []                                                     │                      ║
+║ 126      │ 5        │ warning  │ Missing @notice tag in event 'ElectionClosed'          │ use-natspec          ║
+║ 126      │ 5        │ warning  │ Missing @param tag in event 'ElectionClosed'           │ use-natspec          ║
+║ 126      │ 5        │ warning  │ Mismatch in @param names for event                     │ use-natspec          ║
+║          │          │          │ 'ElectionClosed'. Expected: [timestamp,                │                      ║
+║          │          │          │ totalVotes], Found: []                                 │                      ║
+║ 126      │ 5        │ warning  │ GC: [timestamp] on Event [ElectionClosed] could be     │ gas-indexed-events   ║
+║          │          │          │ Indexed                                                │                      ║
+║ 126      │ 5        │ warning  │ GC: [totalVotes] on Event [ElectionClosed] could       │ gas-indexed-events   ║
+║          │          │          │ be Indexed                                             │                      ║
+║ 219      │ 5        │ warning  │ Missing @param tag in function 'setRace0Name'          │ use-natspec          ║
+║ 219      │ 5        │ warning  │ Mismatch in @param names for function                  │ use-natspec          ║
+║          │          │          │ 'setRace0Name'. Expected: [_name], Found: []           │                      ║
+║ 240      │ 9        │ warning  │ GC: For [ extraRacesCount ] variable,                  │ gas-increment-by-one ║
+║          │          │          │ increment/decrement by 1 using: [ ++variable ] to      │                      ║
+║          │          │          │ save gas                                               │                      ║
+║ 250      │ 5        │ warning  │ Missing @param tag in function                         │ use-natspec          ║
+║          │          │          │ 'addCandidateToRace'                                   │                      ║
+║ 250      │ 5        │ warning  │ Mismatch in @param names for function                  │ use-natspec          ║
+║          │          │          │ 'addCandidateToRace'. Expected: [raceId, _name,        │                      ║
+║          │          │          │ _party, _number], Found: []                            │                      ║
+║ 293      │ 36       │ warning  │ GC: For [ i ] variable, increment/decrement by 1       │ gas-increment-by-one ║
+║          │          │          │ using: [ ++variable ] to save gas                      │                      ║
+║ 367      │ 5        │ warning  │ Function body contains 57 lines but allowed no         │ function-max-lines   ║
+║          │          │          │ more than 50 lines                                     │                      ║
+║ 399      │ 13       │ warning  │ GC: For [ totalVotes ] variable,                       │ gas-increment-by-one ║
+║          │          │          │ increment/decrement by 1 using: [ ++variable ] to      │                      ║
+║          │          │          │ save gas                                               │                      ║
+║ 401      │ 17       │ warning  │ GC: For [ blankVotes ] variable,                       │ gas-increment-by-one ║
+║          │          │          │ increment/decrement by 1 using: [ ++variable ] to      │                      ║
+║          │          │          │ save gas                                               │                      ║
+║ 403      │ 17       │ warning  │ GC: For [ nullVotes ] variable,                        │ gas-increment-by-one ║
+║          │          │          │ increment/decrement by 1 using: [ ++variable ] to      │                      ║
+║          │          │          │ save gas                                               │                      ║
+║ 407      │ 17       │ warning  │ GC: For [ candidates ] variable,                       │ gas-increment-by-one ║
+║          │          │          │ increment/decrement by 1 using: [ ++variable ] to      │                      ║
+║          │          │          │ save gas                                               │                      ║
+║ 411      │ 13       │ warning  │ GC: For [ r ] variable, increment/decrement by 1       │ gas-increment-by-one ║
+║          │          │          │ using: [ ++variable ] to save gas                      │                      ║
+║ 413      │ 17       │ warning  │ GC: For [ r ] variable, increment/decrement by 1       │ gas-increment-by-one ║
+║          │          │          │ using: [ ++variable ] to save gas                      │                      ║
+║ 415      │ 17       │ warning  │ GC: For [ r ] variable, increment/decrement by 1       │ gas-increment-by-one ║
+║          │          │          │ using: [ ++variable ] to save gas                      │                      ║
+║ 419      │ 17       │ warning  │ GC: For [ r ] variable, increment/decrement by 1       │ gas-increment-by-one ║
+║          │          │          │ using: [ ++variable ] to save gas                      │                      ║
+║ 461      │ 36       │ warning  │ GC: For [ i ] variable, increment/decrement by 1       │ gas-increment-by-one ║
+║          │          │          │ using: [ ++variable ] to save gas                      │                      ║
+║ 497      │ 5        │ warning  │ Missing @return tag in function 'getRaceResults'       │ use-natspec          ║
+║ 497      │ 5        │ warning  │ Mismatch in @return names for function                 │ use-natspec          ║
+║          │          │          │ 'getRaceResults'. Expected: [_candidates,              │                      ║
+║          │          │          │ _blankVotes, _nullVotes, _totalVotes], Found: []       │                      ║
+║ 512      │ 20       │ warning  │ GC: Non strict inequality found. Try converting to     │ gas-strict-          ║
+║          │          │          │ a strict one                                           │ inequalities         ║
+║ 524      │ 5        │ warning  │ Missing @param tag in function 'getRaceName'           │ use-natspec          ║
+║ 524      │ 5        │ warning  │ Mismatch in @param names for function                  │ use-natspec          ║
+║          │          │          │ 'getRaceName'. Expected: [raceId], Found: []           │                      ║
+║ 526      │ 13       │ warning  │ GC: Non strict inequality found. Try converting to     │ gas-strict-          ║
+║          │          │          │ a strict one                                           │ inequalities         ║
+║ 548      │ 5        │ warning  │ Missing @param tag in function                         │ use-natspec          ║
+║          │          │          │ 'getCandidatesByRace'                                  │                      ║
+║ 548      │ 5        │ warning  │ Mismatch in @param names for function                  │ use-natspec          ║
+║          │          │          │ 'getCandidatesByRace'. Expected: [raceId], Found:      │                      ║
+║          │          │          │ []                                                     │                      ║
+║ 554      │ 13       │ warning  │ GC: Non strict inequality found. Try converting to     │ gas-strict-          ║
+║          │          │          │ a strict one                                           │ inequalities         ║
+║ 631      │ 36       │ warning  │ GC: For [ i ] variable, increment/decrement by 1       │ gas-increment-by-one ║
+║          │          │          │ using: [ ++variable ] to save gas                      │                      ║
+║ 641      │ 5        │ warning  │ Missing @return tag in function 'getBoletimUrna'       │ use-natspec          ║
+║ 641      │ 5        │ warning  │ Mismatch in @return names for function                 │ use-natspec          ║
+║          │          │          │ 'getBoletimUrna'. Expected: [_electionName,            │                      ║
+║          │          │          │ _electionId, _state, snapshots, voterCount,            │                      ║
+║          │          │          │ _merkleRoot, grandTotalVotes, _blockTimestamp,         │                      ║
+║          │          │          │ _blockNumber], Found: []                               │                      ║
+║ 665      │ 51       │ warning  │ GC: For [ i ] variable, increment/decrement by 1       │ gas-increment-by-one ║
+║          │          │          │ using: [ ++variable ] to save gas                      │                      ║
+║ 683      │ 36       │ warning  │ GC: For [ i ] variable, increment/decrement by 1       │ gas-increment-by-one ║
+║          │          │          │ using: [ ++variable ] to save gas                      │                      ║
+
+src/IVerifier.sol
+
+║ Line     │ Column   │ Type     │ Message                                                │ Rule ID              ║
+╟──────────┼──────────┼──────────┼────────────────────────────────────────────────────────┼──────────────────────╢
+║ 28       │ 1        │ warning  │ Missing @author tag in contract 'IVerifier'            │ use-natspec          ║
+║ 29       │ 5        │ warning  │ Missing @notice tag in function 'verifyProof'          │ use-natspec          ║
+║ 29       │ 5        │ warning  │ Missing @param tag in function 'verifyProof'           │ use-natspec          ║
+║ 29       │ 5        │ warning  │ Mismatch in @param names for function                  │ use-natspec          ║
+║          │          │          │ 'verifyProof'. Expected: [_proof, _pubSignals],        │                      ║
+║          │          │          │ Found: []                                              │                      ║
+
+╔════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
+║ 0 Errors                                                                                                       ║
+╟────────────────────────────────────────────────────────────────────────────────────────────────────────────────╢
+║ 89 Warnings                                                                                                    ║
+╚════════════════════════════════════════════════════════════════════════════════════════════════════════════════╝
+

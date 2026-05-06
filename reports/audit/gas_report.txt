@@ -1,0 +1,242 @@
+No files changed, compilation skipped
+
+Ran 6 tests for test/unit/Deployment.t.sol:DeploymentTest
+[PASS] test_AdminIsDeployer() (gas: 8600)
+[PASS] test_Constants() (gas: 23470)
+[PASS] test_InitialStateIsPending() (gas: 8631)
+[PASS] test_NoCandidatesYet() (gas: 12982)
+[PASS] test_TalliesStartAtZero() (gas: 19241)
+[PASS] test_VerifierIsWired() (gas: 10122)
+Suite result: ok. 6 passed; 0 failed; 0 skipped; finished in 1.15ms (368.34µs CPU time)
+
+Ran 6 tests for test/unit/Lifecycle.t.sol:LifecycleTest
+[PASS] test_CloseElection_HappyPath() (gas: 74558)
+[PASS] test_CloseElection_RevertWhenStillPending() (gas: 32392)
+[PASS] test_OpenElection_RevertWhenNonAdmin() (gas: 34769)
+[PASS] test_OpenElection_RevertWhenNotPending() (gas: 63667)
+[PASS] test_OpenElection_Transitions() (gas: 43742)
+[PASS] test_StateMachineIsOneWay() (gas: 119150)
+Suite result: ok. 6 passed; 0 failed; 0 skipped; finished in 1.80ms (614.62µs CPU time)
+
+Ran 15 tests for test/unit/AdminSetup.t.sol:AdminSetupTest
+[PASS] test_AddCandidate_AssignsSequentialIds() (gas: 448070)
+[PASS] test_AddCandidate_EmitsEvent() (gas: 270446)
+[PASS] test_AddCandidate_RevertOnDuplicateNumber() (gas: 296682)
+[PASS] test_AddCandidate_RevertWhenNonAdmin() (gas: 131416)
+[PASS] test_CreateElection_HappyPath() (gas: 118584)
+[PASS] test_CreateElection_RevertOnDuplicate() (gas: 131310)
+[PASS] test_CreateElection_RevertWhenNonAdmin() (gas: 36690)
+[PASS] test_RegisterVoterHashes_HappyPath() (gas: 513665)
+[PASS] test_RegisterVoterHashes_RevertOnSecondCall() (gas: 536955)
+[PASS] test_RegisterVoterHashes_RevertOnZeroHash() (gas: 173754)
+[PASS] test_RegisterVoterHashes_RevertWhenNonAdmin() (gas: 136665)
+[PASS] test_RegisterVoterHashes_RevertWhenTooMany() (gas: 134777)
+[PASS] test_SetMerkleRoot_HappyPath() (gas: 557756)
+[PASS] test_SetMerkleRoot_RevertWhenNoHashes() (gas: 129958)
+[PASS] test_SetMerkleRoot_RevertWhenNonAdmin() (gas: 530386)
+Suite result: ok. 15 passed; 0 failed; 0 skipped; finished in 3.39ms (2.96ms CPU time)
+
+Ran 18 tests for test/unit/CastVote.t.sol:CastVoteTest
+[PASS] test_CastVote_EmitsVoteCast() (gas: 291836)
+[PASS] test_CastVote_ForwardsPubSignalsInCanonicalOrder() (gas: 318034)
+[PASS] test_CastVote_NullifierMarkedUsed() (gas: 298383)
+[PASS] test_CastVote_RecordsBlankVote() (gas: 272694)
+[PASS] test_CastVote_RecordsCandidateVote() (gas: 307843)
+[PASS] test_CastVote_RecordsNullVote() (gas: 292696)
+[PASS] test_CastVote_RevertInvalidElectionId() (gas: 51569)
+[PASS] test_CastVote_RevertInvalidMerkleRoot() (gas: 49574)
+[PASS] test_CastVote_RevertInvalidProof() (gas: 3589691)
+[PASS] test_CastVote_RevertInvalidRaceIdParam() (gas: 47315)
+[PASS] test_CastVote_RevertOnDoubleVote() (gas: 335280)
+[PASS] test_CastVote_RevertOnUnknownCandidate() (gas: 271318)
+[PASS] test_CastVote_RevertRaceIdMismatch() (gas: 51947)
+[PASS] test_CastVote_RevertWhenFinished() (gas: 75548)
+[PASS] test_CastVote_RevertWhenPending() (gas: 3179346)
+[PASS] test_CastVote_TwoDistinctNullifiers() (gas: 460203)
+[PASS] test_IsNullifierUsed_FalseInitially() (gas: 10735)
+[PASS] test_IsNullifierUsed_RevertOnNonZeroRace() (gas: 12204)
+Suite result: ok. 18 passed; 0 failed; 0 skipped; finished in 3.50ms (3.96ms CPU time)
+
+Ran 3 tests for test/unit/Zeresima.t.sol:ZeresimaTest
+[PASS] test_Zeresima_AllZeroBeforeAnyVote() (gas: 48124)
+[PASS] test_Zeresima_RevertOnceFinished() (gas: 524807)
+[PASS] test_Zeresima_RevertOnceOpen() (gas: 494199)
+Suite result: ok. 3 passed; 0 failed; 0 skipped; finished in 595.80ms (3.76ms CPU time)
+
+Ran 7 tests for test/unit/Results.t.sol:ResultsTest
+[PASS] test_GetCandidateCount() (gas: 7928)
+[PASS] test_GetCandidatesByRace_RevertOnNonZeroRace() (gas: 13646)
+[PASS] test_GetCandidates_ReturnsAll() (gas: 41099)
+[PASS] test_GetRaceResults_MatchesGetResults() (gas: 524518)
+[PASS] test_GetRaceResults_RevertOnNonZeroRace() (gas: 14121)
+[PASS] test_GetVoterHashes() (gas: 44073)
+[PASS] test_Results_TalliesAcrossAllVoteTypes() (gas: 1441148)
+Suite result: ok. 7 passed; 0 failed; 0 skipped; finished in 599.06ms (2.24ms CPU time)
+
+Ran 3 tests for test/invariant/VotingInvariants.t.sol:VotingInvariantsTest
+[PASS] invariant_GhostMatchesOnChain() (runs: 64, calls: 2048, reverts: 0)
+
+╭---------------+---------------+-------+---------+----------╮
+| Contract      | Selector      | Calls | Reverts | Discards |
++============================================================+
+| VotingHandler | castVote      | 1043  | 0       | 0        |
+|---------------+---------------+-------+---------+----------|
+| VotingHandler | closeElection | 1005  | 0       | 0        |
+╰---------------+---------------+-------+---------+----------╯
+
+[PASS] invariant_StateMonotonic() (runs: 64, calls: 2048, reverts: 0)
+
+╭---------------+---------------+-------+---------+----------╮
+| Contract      | Selector      | Calls | Reverts | Discards |
++============================================================+
+| VotingHandler | castVote      | 1001  | 0       | 0        |
+|---------------+---------------+-------+---------+----------|
+| VotingHandler | closeElection | 1047  | 0       | 0        |
+╰---------------+---------------+-------+---------+----------╯
+
+[PASS] invariant_TalliesSumToTotal() (runs: 64, calls: 2048, reverts: 0)
+
+╭---------------+---------------+-------+---------+----------╮
+| Contract      | Selector      | Calls | Reverts | Discards |
++============================================================+
+| VotingHandler | castVote      | 1020  | 0       | 0        |
+|---------------+---------------+-------+---------+----------|
+| VotingHandler | closeElection | 1028  | 0       | 0        |
+╰---------------+---------------+-------+---------+----------╯
+
+Suite result: ok. 3 passed; 0 failed; 0 skipped; finished in 599.17ms (1.65s CPU time)
+
+Ran 5 tests for test/fuzz/CastVoteFuzz.t.sol:CastVoteFuzzTest
+[PASS] testFuzz_CastVote_NullifierUniqueness(uint256,uint8) (runs: 256, μ: 346092, ~: 345945)
+[PASS] testFuzz_CastVote_RevertOnInvalidCandidate(uint256,uint256) (runs: 256, μ: 273489, ~: 273505)
+[PASS] testFuzz_CastVote_RevertOnNonZeroRaceParam(uint256,uint256) (runs: 256, μ: 47527, ~: 47563)
+[PASS] testFuzz_CastVote_RevertOnWrongElectionId(uint256) (runs: 256, μ: 52032, ~: 52000)
+[PASS] testFuzz_CastVote_RevertOnWrongMerkleRoot(uint256) (runs: 256, μ: 49592, ~: 49527)
+Suite result: ok. 5 passed; 0 failed; 0 skipped; finished in 615.46ms (1.11s CPU time)
+
+Ran 3 tests for test/fuzz/AdminFuzz.t.sol:AdminFuzzTest
+[PASS] testFuzz_AddCandidate_RejectsDuplicateNumber(uint256) (runs: 256, μ: 201114, ~: 201510)
+[PASS] testFuzz_RegisterVoterHashes_AcceptsValidLengths(uint8,uint256) (runs: 256, μ: 243507, ~: 234187)
+[PASS] testFuzz_RegisterVoterHashes_RejectsTooMany(uint16) (runs: 256, μ: 79931, ~: 73514)
+Suite result: ok. 3 passed; 0 failed; 0 skipped; finished in 635.72ms (1.31s CPU time)
+
+╭------------------------------------------------+-----------------+--------+--------+--------+---------╮
+| src/VotingContract.sol:VotingContract Contract |                 |        |        |        |         |
++=======================================================================================================+
+| Deployment Cost                                | Deployment Size |        |        |        |         |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| 2489275                                        | 11170           |        |        |        |         |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+|                                                |                 |        |        |        |         |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| Function Name                                  | Min             | Avg    | Median | Max    | # Calls |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| BLANK_VOTE                                     | 150             | 150    | 150    | 150    | 1       |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| MAX_VOTERS                                     | 441             | 441    | 441    | 441    | 1       |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| NULL_VOTE                                      | 793             | 793    | 793    | 793    | 1       |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| addCandidate                                   | 25035           | 104248 | 147536 | 164876 | 600     |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| admin                                          | 3137            | 3137   | 3137   | 3137   | 1       |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| blankVotes                                     | 2742            | 2742   | 2742   | 2742   | 3       |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| candidates                                     | 2511            | 11621  | 14658  | 14658  | 4       |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| castVote                                       | 32938           | 137702 | 147439 | 281100 | 2232    |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| closeElection                                  | 23936           | 30186  | 30250  | 30250  | 200     |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| createElection                                 | 25305           | 92411  | 94819  | 94819  | 60      |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| currentElectionId                              | 2918            | 2918   | 2918   | 2918   | 1       |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| electionName                                   | 3540            | 3540   | 3540   | 3540   | 1       |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| extraRacesCount                                | 2654            | 2654   | 2654   | 2654   | 1       |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| getCandidateCount                              | 2456            | 2456   | 2456   | 2456   | 1       |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| getCandidates                                  | 27502           | 27502  | 27502  | 27502  | 1       |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| getCandidatesByRace                            | 2878            | 2878   | 2878   | 2878   | 1       |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| getRaceResults                                 | 3164            | 18955  | 18955  | 34747  | 2       |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| getResults                                     | 34239           | 34239  | 34239  | 34239  | 3       |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| getVoterHashes                                 | 37012           | 37012  | 37012  | 37012  | 1       |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| getZeresima                                    | 2362            | 13398  | 2362   | 35470  | 3       |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| isNullifierUsed                                | 2947            | 4420   | 5157   | 5157   | 3       |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| nullVotes                                      | 2808            | 2808   | 2808   | 2808   | 3       |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| nullifiers                                     | 3013            | 3013   | 3013   | 3013   | 257     |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| openElection                                   | 24119           | 30011  | 30486  | 30486  | 40      |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| racesCount                                     | 2509            | 2509   | 2509   | 2509   | 1       |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| registerVoterHashes                            | 26394           | 150740 | 70982  | 424457 | 559     |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| setMerkleRoot                                  | 24066           | 48190  | 49343  | 49343  | 42      |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| state                                          | 3021            | 3021   | 3021   | 3021   | 3986    |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| totalVotes                                     | 2324            | 2324   | 2324   | 2324   | 6       |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| verifier                                       | 2458            | 2458   | 2458   | 2458   | 1       |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| voterHashes                                    | 4706            | 4706   | 4706   | 4706   | 514     |
+|------------------------------------------------+-----------------+--------+--------+--------+---------|
+| voterMerkleRoot                                | 2412            | 2412   | 2412   | 2412   | 1       |
+╰------------------------------------------------+-----------------+--------+--------+--------+---------╯
+
+╭------------------------------------------------------------------+-----------------+-------+--------+--------+---------╮
+| test/invariant/handlers/VotingHandler.sol:VotingHandler Contract |                 |       |        |        |         |
++========================================================================================================================+
+| Deployment Cost                                                  | Deployment Size |       |        |        |         |
+|------------------------------------------------------------------+-----------------+-------+--------+--------+---------|
+| 4608266                                                          | 18061           |       |        |        |         |
+|------------------------------------------------------------------+-----------------+-------+--------+--------+---------|
+|                                                                  |                 |       |        |        |         |
+|------------------------------------------------------------------+-----------------+-------+--------+--------+---------|
+| Function Name                                                    | Min             | Avg   | Median | Max    | # Calls |
+|------------------------------------------------------------------+-----------------+-------+--------+--------+---------|
+| castVote                                                         | 3159            | 62540 | 11340  | 364735 | 3108    |
+|------------------------------------------------------------------+-----------------+-------+--------+--------+---------|
+| closeElection                                                    | 329             | 4993  | 329    | 46585  | 3132    |
+|------------------------------------------------------------------+-----------------+-------+--------+--------+---------|
+| ghostBlankVotes                                                  | 2682            | 2682  | 2682   | 2682   | 1       |
+|------------------------------------------------------------------+-----------------+-------+--------+--------+---------|
+| ghostMaxState                                                    | 2770            | 2770  | 2770   | 2770   | 1       |
+|------------------------------------------------------------------+-----------------+-------+--------+--------+---------|
+| ghostNullVotes                                                   | 2594            | 2594  | 2594   | 2594   | 1       |
+|------------------------------------------------------------------+-----------------+-------+--------+--------+---------|
+| ghostTotalVotes                                                  | 2308            | 2308  | 2308   | 2308   | 1       |
+|------------------------------------------------------------------+-----------------+-------+--------+--------+---------|
+| voting                                                           | 2883            | 2883  | 2883   | 2883   | 3       |
+╰------------------------------------------------------------------+-----------------+-------+--------+--------+---------╯
+
+╭---------------------------------------------------+-----------------+------+--------+------+---------╮
+| test/mocks/MockVerifier.sol:MockVerifier Contract |                 |      |        |      |         |
++======================================================================================================+
+| Deployment Cost                                   | Deployment Size |      |        |      |         |
+|---------------------------------------------------+-----------------+------+--------+------+---------|
+| 163029                                            | 536             |      |        |      |         |
+|---------------------------------------------------+-----------------+------+--------+------+---------|
+|                                                   |                 |      |        |      |         |
+|---------------------------------------------------+-----------------+------+--------+------+---------|
+| Function Name                                     | Min             | Avg  | Median | Max  | # Calls |
+|---------------------------------------------------+-----------------+------+--------+------+---------|
+| called                                            | 2314            | 2314 | 2314   | 2314 | 1       |
+|---------------------------------------------------+-----------------+------+--------+------+---------|
+| getLastPubSignal                                  | 2402            | 2402 | 2402   | 2402 | 5       |
+╰---------------------------------------------------+-----------------+------+--------+------+---------╯
+
+
+Ran 9 test suites in 1.03s (3.06s CPU time): 66 tests passed, 0 failed, 0 skipped (66 total tests)

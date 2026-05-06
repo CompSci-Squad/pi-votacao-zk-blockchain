@@ -27,3 +27,4 @@ ignition/deployments/
 # Misc
 .DS_Store
 *.log
+.voting_addr

@@ -36,6 +36,8 @@ contract DeploymentTest is BaseTest {
         assertEq(voting.BLANK_VOTE(), 0);
         assertEq(voting.NULL_VOTE(), 999);
         assertEq(voting.MAX_VOTERS(), 16);
-        assertEq(voting.POC_RACE_ID(), 0);
+        // POC_RACE_ID was removed in the multi-race refactor; race 0 is implicit.
+        assertEq(voting.racesCount(), 1);
+        assertEq(voting.extraRacesCount(), 0);
     }
 }

@@ -1,0 +1,104 @@
+{
+  "kind": "zeresima",
+  "electionName": "Eleição PoC pi_votacao",
+  "electionId": "1",
+  "voterCount": "3",
+  "merkleRoot": "0x129645aee06fcec30efe21e408a4715d689f07387526874f9d8725b0124d7743",
+  "allZero": true,
+  "capturedAt": {
+    "blockNumber": "16",
+    "blockTimestamp": "1778029385",
+    "isoUTC": "2026-05-06T01:03:05.000Z"
+  },
+  "contractAddress": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+  "rpcUrl": "http://127.0.0.1:8545",
+  "races": [
+    {
+      "raceId": "0",
+      "name": "Presidente",
+      "candidates": [
+        {
+          "id": "1",
+          "name": "Alice Oliveira",
+          "party": "PT",
+          "number": "13",
+          "voteCount": "0"
+        },
+        {
+          "id": "2",
+          "name": "Bruno Silva",
+          "party": "PSD",
+          "number": "45",
+          "voteCount": "0"
+        }
+      ],
+      "blankVotes": "0",
+      "nullVotes": "0",
+      "totalVotes": "0"
+    },
+    {
+      "raceId": "1",
+      "name": "Governador",
+      "candidates": [
+        {
+          "id": "1",
+          "name": "Carla Souza",
+          "party": "PSDB",
+          "number": "25",
+          "voteCount": "0"
+        },
+        {
+          "id": "2",
+          "name": "Daniel Rocha",
+          "party": "REPUBLICANOS",
+          "number": "10",
+          "voteCount": "0"
+        },
+        {
+          "id": "3",
+          "name": "Eduarda Lima",
+          "party": "PSOL",
+          "number": "50",
+          "voteCount": "0"
+        }
+      ],
+      "blankVotes": "0",
+      "nullVotes": "0",
+      "totalVotes": "0"
+    },
+    {
+      "raceId": "2",
+      "name": "Senador",
+      "candidates": [
+        {
+          "id": "1",
+          "name": "Fernando Pires",
+          "party": "PL",
+          "number": "22",
+          "voteCount": "0"
+        },
+        {
+          "id": "2",
+          "name": "Gabriela Mendes",
+          "party": "PT",
+          "number": "13",
+          "voteCount": "0"
+        },
+        {
+          "id": "3",
+          "name": "Henrique Alves",
+          "party": "UNIÃO",
+          "number": "44",
+          "voteCount": "0"
+        }
+      ],
+      "blankVotes": "0",
+      "nullVotes": "0",
+      "totalVotes": "0"
+    }
+  ],
+  "_integrity": {
+    "algo": "sha256",
+    "canonical_sha256": "5da1d90af612d7626fe2dfc24d5d29a36d0a47850916292e281d3315e6a03af7"
+  }
+}

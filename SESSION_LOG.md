@@ -242,3 +242,33 @@ Mirrored from root [SESSION_LOG.md](../SESSION_LOG.md) entry of 2026-04-25. Test
 
 ### Blockers
 - None.
+
+---
+
+## Session — 2026-05-06 (mirrors root SESSION_LOG entry of 2026-05-06)
+
+### Test-related portion (mirrored from root)
+- **Forge:** 66 / 66 passing (`forge test --gas-report` saved to `reports/audit/gas_report.txt`).
+- **Integration (Mocha + ethers + anvil):** 13 / 13 passing in ~1 min, including 3 new multi-race scenarios (`multi-race happy path`, `cross-race nullifier isolation`, `invalid raceId`).
+- **Demo run:** `node scripts/reports/run_e2e_demo.js` — 9 ballots across 3 races, all reports stamped:
+  - zerésima sha256 `5da1d90af612d7626fe2dfc24d5d29a36d0a47850916292e281d3315e6a03af7`
+  - bu       sha256 `b97bdbb2b4b5f53aa7532f01dc21e5c9524e4f17efe67f25c6b2e3b5fc9460b7`
+  - rdv      sha256 `8335cca95611b3fddabf2ffcab2b6274206a224f08c3b8fc3a4042efa8f5895c` (9 ballots)
+
+### Contract changes that touched test surface
+- Removed `POC_RACE_ID` constant; existing unit test (`Deployment.t.sol::test_Constants`) updated to assert `racesCount() == 1` and `extraRacesCount() == 0`.
+- Added admin path `setRace0Name / addRace / addCandidateToRace` (PENDING-only).
+- Added views `getRaceResults / getCandidatesByRace / getRaceName / getZeresimaMultiRace / getBoletimUrna` and events `RaceAdded / Race0Named / CandidateAddedToRace`.
+- `castVote` now accepts `raceId ∈ [0, extraRacesCount]`; revert priority preserved.
+- All previous 10 integration scenarios remain green unchanged.
+
+### Static analysis
+- Solhint 6.2.1: 0 errors, 89 warnings (cosmetic NatSpec / gas hints) — see `reports/audit/solhint.txt`.
+- Slither deferred (env lacks `pip`) — recommended invocation documented in `reports/audit/SUMMARY.md`.
+
+### Boundary preserved
+- `voter_proof.zkey` SHA-256 `e338ebdc…0255`, `Verifier.sol` SHA-256 `fe24c84d…6944` — UNCHANGED.
+- 5 pubSignals layout, Poseidon nullifier formula, CEI ordering — UNCHANGED.
+
+### Session report
+- Full report at `reports/SESSION_REPORT_2026-05-06.md`.

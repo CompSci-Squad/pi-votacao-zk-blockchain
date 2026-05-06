@@ -16,8 +16,8 @@ const { expect } = require("chai");
 const { ethers } = require("ethers");
 
 const {
-  startAnvilIfNeeded,
-  stopAnvil,
+  ensureAnvilReachable,
+  resetAnvil,
   loadArtifact,
   getProvider,
   getWallets,
@@ -32,26 +32,62 @@ const {
 
 // ─── Scenario constants ────────────────────────────────────────────────────
 const ELECTION_ID = 1n;
-const RACE_ID = 0n; // POC_RACE_ID — pinned by the contract
+const RACE_ID = 0n;            // Race 0 is the implicit default race.
+const RACE_ID_GOV = 1n;        // Governador
+const RACE_ID_SEN = 2n;        // Senador
 const VOTER_IDS = [12345678901n, 22222222222n, 33333333333n];
 const CANDIDATES = [
   ["Alice Oliveira", "PT", 13n],
   ["Bruno Silva", "PSD", 45n],
+];
+// Per-race candidate slates for races 1 and 2.
+const CANDIDATES_RACE1 = [
+  ["Carla Souza", "PSDB", 25n],
+  ["Daniel Rocha", "REPUBLICANOS", 10n],
+  ["Eduarda Lima", "PSOL", 50n],
+];
+const CANDIDATES_RACE2 = [
+  ["Fernando Pires", "PL", 22n],
+  ["Gabriela Mendes", "PT", 13n],
+  ["Henrique Alves", "UNI\u00c3O", 44n],
 ];
 const CANDIDATE_ALICE = 1n;
 const CANDIDATE_BRUNO = 2n;
 const BLANK = 0n;
 const NULL_VOTE = 999n;
 
-async function expectCustomError(promise, errorName) {
+async function expectCustomError(promise, errorName, iface) {
   try {
     await promise;
   } catch (err) {
-    const msg = err?.shortMessage || err?.message || String(err);
-    if (!msg.includes(errorName)) {
-      throw new Error(`expected revert ${errorName}, got: ${msg}`);
+    // ethers v6 wraps revert data in a few possible shapes. Try them all.
+    const candidates = [
+      err?.error?.data,
+      err?.data,
+      err?.info?.error?.data,
+      err?.error?.error?.data,
+      err?.revert?.data,
+      typeof err?.data === "string" ? err.data : null,
+    ].filter((v) => typeof v === "string" && v.startsWith("0x") && v.length >= 10);
+
+    for (const data of candidates) {
+      try {
+        const parsed = iface.parseError(data);
+        if (parsed && parsed.name === errorName) return;
+        if (parsed) {
+          throw new Error(
+            `expected revert ${errorName}, got custom error ${parsed.name}`
+          );
+        }
+      } catch (_) {
+        // continue
+      }
     }
-    return;
+
+    // Fallback: substring match against message (covers nested ethers errors).
+    const msg = err?.shortMessage || err?.message || String(err);
+    if (msg.includes(errorName)) return;
+    throw new Error(`expected revert ${errorName}, got: ${msg}`);
   }
   throw new Error(`expected revert ${errorName}, but tx succeeded`);
 }
@@ -87,8 +123,9 @@ describe("Integration: real PLONK proof → on-chain castVote", function () {
       );
       this.skip();
     }
-    await startAnvilIfNeeded();
+    await ensureAnvilReachable();
     provider = getProvider();
+    await resetAnvil(provider);
     wallets = getWallets(provider);
     [, voter, otherVoter, third] = wallets;
 
@@ -106,13 +143,14 @@ describe("Integration: real PLONK proof → on-chain castVote", function () {
 
   async function deployAndOpen() {
     const admin = wallets[0];
+    let nonce = await provider.getTransactionCount(admin.address, "latest");
 
     const VerifierFactory = new ethers.ContractFactory(
       verifierArtifact.abi,
       verifierArtifact.bytecode,
       admin
     );
-    const verifier = await VerifierFactory.deploy();
+    const verifier = await VerifierFactory.deploy({ nonce: nonce++ });
     await verifier.waitForDeployment();
 
     const VotingFactory = new ethers.ContractFactory(
@@ -120,20 +158,32 @@ describe("Integration: real PLONK proof → on-chain castVote", function () {
       votingArtifact.bytecode,
       admin
     );
-    voting = await VotingFactory.deploy(await verifier.getAddress());
+    voting = await VotingFactory.deploy(await verifier.getAddress(), { nonce: nonce++ });
     await voting.waitForDeployment();
 
-    await (await voting.createElection("Eleicao Integracao", "E2E real-proof suite")).wait();
+    await (await voting.createElection("Eleicao Integracao", "E2E real-proof suite", { nonce: nonce++ })).wait();
+    // Race 0 (implicit) — keeps the legacy slate so all existing tests stay green.
+    await (await voting.setRace0Name("Presidente", { nonce: nonce++ })).wait();
     for (const c of CANDIDATES) {
-      await (await voting.addCandidate(...c)).wait();
+      await (await voting.addCandidate(...c, { nonce: nonce++ })).wait();
+    }
+    // Race 1 — Governador
+    await (await voting.addRace("Governador", { nonce: nonce++ })).wait();
+    for (const c of CANDIDATES_RACE1) {
+      await (await voting.addCandidateToRace(RACE_ID_GOV, ...c, { nonce: nonce++ })).wait();
+    }
+    // Race 2 — Senador
+    await (await voting.addRace("Senador", { nonce: nonce++ })).wait();
+    for (const c of CANDIDATES_RACE2) {
+      await (await voting.addCandidateToRace(RACE_ID_SEN, ...c, { nonce: nonce++ })).wait();
     }
 
     tree = await buildPoseidonTree(VOTER_IDS);
     const leafHashes = VOTER_IDS.map((_, i) => tree.leaves[i]);
 
-    await (await voting.registerVoterHashes(leafHashes)).wait();
-    await (await voting.setMerkleRoot(tree.root)).wait();
-    await (await voting.openElection()).wait();
+    await (await voting.registerVoterHashes(leafHashes, { nonce: nonce++ })).wait();
+    await (await voting.setMerkleRoot(tree.root, { nonce: nonce++ })).wait();
+    await (await voting.openElection({ nonce: nonce++ })).wait();
   }
 
   it("happy path: registered voter casts a vote, counter increments, VoteCast emitted", async () => {
@@ -191,8 +241,9 @@ describe("Integration: real PLONK proof → on-chain castVote", function () {
 
     await (await voting.connect(voter).castVote(RACE_ID, pubSignals, proofArr)).wait();
     await expectCustomError(
-      voting.connect(voter).castVote(RACE_ID, pubSignals, proofArr),
-      "NullifierAlreadyUsed"
+      voting.connect(otherVoter).castVote(RACE_ID, pubSignals, proofArr),
+      "NullifierAlreadyUsed",
+      voting.interface
     );
   });
 
@@ -211,7 +262,8 @@ describe("Integration: real PLONK proof → on-chain castVote", function () {
 
     await expectCustomError(
       voting.connect(voter).castVote(RACE_ID, tampered, proofArr),
-      "RaceIdMismatch"
+      "RaceIdMismatch",
+      voting.interface
     );
   });
 
@@ -228,7 +280,8 @@ describe("Integration: real PLONK proof → on-chain castVote", function () {
 
     await expectCustomError(
       voting.connect(voter).castVote(RACE_ID, pubSignals, proofArr),
-      "InvalidMerkleRoot"
+      "InvalidMerkleRoot",
+      voting.interface
     );
   });
 
@@ -244,7 +297,8 @@ describe("Integration: real PLONK proof → on-chain castVote", function () {
 
     await expectCustomError(
       voting.connect(voter).castVote(RACE_ID, pubSignals, proofArr),
-      "InvalidElectionId"
+      "InvalidElectionId",
+      voting.interface
     );
   });
 
@@ -279,7 +333,8 @@ describe("Integration: real PLONK proof → on-chain castVote", function () {
     await (await voting.closeElection()).wait();
     await expectCustomError(
       voting.connect(voter).castVote(RACE_ID, pubSignals, proofArr),
-      "ElectionNotOpen"
+      "ElectionNotOpen",
+      voting.interface
     );
   });
 
@@ -340,686 +395,79 @@ describe("Integration: real PLONK proof → on-chain castVote", function () {
     expect(resCandidates[0].voteCount).to.equal(2n);
     expect(resCandidates[1].voteCount).to.equal(1n);
   });
-});
-/**
- * test/integration/e2e_real_proof.test.js
- *
- * INTEGRATION SUITE — real PLONK proof, real PlonkVerifier, real on-chain castVote.
- *
- * Boundary: pi-votacao-zk-circuits ⇄ pi-votacao-zk-blockchain.
- * See ../../.github/copilot-instructions.md (root) Section 2 for invariants.
- *
- * Stack: Mocha + ethers v6 + anvil. ABIs are loaded from Foundry's `out/`.
- * Deployment is performed in JS (rather than via `forge script`) so the suite
- * can take an evm_snapshot once and revert between tests for speed.
- *
- * The whole suite is skipped if ZK artifacts are missing (run
- * `npm run sync:circuit` from this repo first).
- */
-"use strict";
 
-const { expect } = require("chai");
-const { ethers } = require("ethers");
+  // ──────────────────────────── Multi-race scenarios ──────────────────────────
 
-const {
-  startAnvilIfNeeded,
-  stopAnvil,
-  loadArtifact,
-  getProvider,
-  getWallets,
-  snapshot,
-  revert,
-} = require("./helpers/anvil");
-const {
-  artifactsAvailable,
-  buildPoseidonTree,
-  generateProof,
-} = require("./helpers/proof");
+  it("multi-race happy path: same voter casts in 3 races → 3 distinct nullifiers + VoteCast events", async () => {
+    const races = [RACE_ID, RACE_ID_GOV, RACE_ID_SEN];
+    const candidatesPicked = [CANDIDATE_ALICE, 2n /* Daniel */, 3n /* Henrique */];
+    const nullifiers = [];
 
-// ─── Scenario constants ────────────────────────────────────────────────────
-const ELECTION_ID = 1n;
-const RACE_ID = 0n; // POC_RACE_ID — pinned by the contract
-const VOTER_IDS = [12345678901n, 22222222222n, 33333333333n];
-const CANDIDATES = [
-  ["Alice Oliveira", "PT", 13n],
-  ["Bruno Silva", "PSD", 45n],
-];
-const CANDIDATE_ALICE = 1n;
-const CANDIDATE_BRUNO = 2n;
-const BLANK = 0n;
-const NULL_VOTE = 999n;
-
-// ─── Helpers ───────────────────────────────────────────────────────────────
-
-async function expectCustomError(promise, errorName) {
-  try {
-    await promise;
-  } catch (err) {
-    const msg = err?.shortMessage || err?.message || String(err);
-    if (!msg.includes(errorName)) {
-      throw new Error(`expected revert ${errorName}, got: ${msg}`);
-    }
-    return;
-  }
-  throw new Error(`expected revert ${errorName}, but tx succeeded`);
-}
-
-async function expectAnyRevert(promise) {
-  try {
-    await promise;
-  } catch (_) {
-    return;
-  }
-  throw new Error("expected revert, but tx succeeded");
-}
-
-// ─── Suite ─────────────────────────────────────────────────────────────────
-
-describe("Integration: real PLONK proof → on-chain castVote", function () {
-  this.timeout(120_000);
-
-  let provider;
-  let wallets;
-  let votingArtifact;
-  let verifierArtifact;
-  let baselineSnapshot; // snapshot taken right after admin setup
-  let voting;
-  let voter;
-  let otherVoter;
-  let third;
-  let tree;
-
-  before(async function () {
-    if (!artifactsAvailable()) {
-      // eslint-disable-next-line no-console
-      console.warn(
-        "\n  [SKIP] integration suite — ZK artifacts not found.\n" +
-          "         Run: npm run sync:circuit\n"
-      );
-      this.skip();
-    }
-    await startAnvilIfNeeded();
-    provider = getProvider();
-    wallets = getWallets(provider);
-    [, voter, otherVoter, third] = wallets;
-
-    votingArtifact = loadArtifact("VotingContract.sol", "VotingContract");
-    verifierArtifact = loadArtifact("Verifier.sol", "PlonkVerifier");
-
-    await deployAndOpen();
-    baselineSnapshot = await snapshot(provider);
-  });
-
-  beforeEach(async () => {
-    // Restore to the post-setup baseline so each test starts fresh.
-    await revert(provider, baselineSnapshot);
-    baselineSnapshot = await snapshot(provider);
-  });
-
-  after(async () => {
-    await stopAnvil();
-  });
-
-  async function deployAndOpen() {
-    const admin = wallets[0];
-
-    const VerifierFactory = new ethers.ContractFactory(
-      verifierArtifact.abi,
-      verifierArtifact.bytecode,
-      admin
-    );
-    const verifier = await VerifierFactory.deploy();
-    await verifier.waitForDeployment();
-
-    const VotingFactory = new ethers.ContractFactory(
-      votingArtifact.abi,
-      votingArtifact.bytecode,
-      admin
-    );
-    voting = await VotingFactory.deploy(await verifier.getAddress());
-    await voting.waitForDeployment();
-
-    await (await voting.createElection("Eleicao Integracao", "E2E real-proof suite")).wait();
-    for (const c of CANDIDATES) {
-      await (await voting.addCandidate(...c)).wait();
-    }
-
-    tree = await buildPoseidonTree(VOTER_IDS);
-    const leafHashes = VOTER_IDS.map((_, i) => tree.leaves[i]);
-
-    await (await voting.registerVoterHashes(leafHashes)).wait();
-    await (await voting.setMerkleRoot(tree.root)).wait();
-    await (await voting.openElection()).wait();
-  }
-
-  // ── Happy path ──────────────────────────────────────────────────────────
-  it("happy path: registered voter casts a vote, counter increments, VoteCast emitted", async () => {
-    const { proofArr, pubSignals } = await generateProof({
-      tree,
-      voterIndex: 0,
-      voterId: VOTER_IDS[0],
-      electionId: ELECTION_ID,
-      raceId: RACE_ID,
-      candidateId: CANDIDATE_ALICE,
-    });
-
-    expect(pubSignals).to.have.lengthOf(5);
-    expect(pubSignals[0]).to.equal(BigInt(tree.root));
-    expect(pubSignals[2]).to.equal(CANDIDATE_ALICE);
-    expect(pubSignals[3]).to.equal(ELECTION_ID);
-    expect(pubSignals[4]).to.equal(RACE_ID);
-
-    const tx = await voting.connect(voter).castVote(RACE_ID, pubSignals, proofArr);
-    const rc = await tx.wait();
-
-    const ev = rc.logs
-      .map((l) => {
-        try {
-          return voting.interface.parseLog(l);
-        } catch (_) {
-          return null;
-        }
-      })
-      .find((p) => p?.name === "VoteCast");
-    expect(ev, "VoteCast emitted").to.not.equal(undefined);
-    expect(ev.args[0]).to.equal(pubSignals[1]);
-    expect(ev.args[1]).to.equal(RACE_ID);
-    expect(ev.args[2]).to.equal(CANDIDATE_ALICE);
-
-    const [resCandidates, blank, nullVotes, total] = await voting.getResults();
-    expect(total).to.equal(1n);
-    expect(blank).to.equal(0n);
-    expect(nullVotes).to.equal(0n);
-    expect(resCandidates[0].voteCount).to.equal(1n);
-    expect(resCandidates[1].voteCount).to.equal(0n);
-
-    expect(await voting.isNullifierUsed(RACE_ID, pubSignals[1])).to.equal(true);
-  });
-
-  // ── Double vote ─────────────────────────────────────────────────────────
-  it("double vote: same nullifier rejected the second time", async () => {
-    const { proofArr, pubSignals } = await generateProof({
-      tree,
-      voterIndex: 1,
-      voterId: VOTER_IDS[1],
-      electionId: ELECTION_ID,
-      raceId: RACE_ID,
-      candidateId: CANDIDATE_BRUNO,
-    });
-
-    await (await voting.connect(voter).castVote(RACE_ID, pubSignals, proofArr)).wait();
-    await expectCustomError(
-      voting.connect(voter).castVote(RACE_ID, pubSignals, proofArr),
-      "NullifierAlreadyUsed"
-    );
-  });
-
-  // ── Relay attack (race_id tamper) ───────────────────────────────────────
-  it("relay attack: tampering pubSignals[4] (race_id) trips RaceIdMismatch", async () => {
-    const { proofArr, pubSignals } = await generateProof({
-      tree,
-      voterIndex: 0,
-      voterId: VOTER_IDS[0],
-      electionId: ELECTION_ID,
-      raceId: RACE_ID,
-      candidateId: CANDIDATE_ALICE,
-    });
-
-    const tampered = [...pubSignals];
-    tampered[4] = 1n;
-
-    await expectCustomError(
-      voting.connect(voter).castVote(RACE_ID, tampered, proofArr),
-      "RaceIdMismatch"
-    );
-  });
-
-  // ── Wrong Merkle root ───────────────────────────────────────────────────
-  it("wrong merkle root: voter from a stale tree is rejected", async () => {
-    const staleTree = await buildPoseidonTree([99999999999n]);
-    const { proofArr, pubSignals } = await generateProof({
-      tree: staleTree,
-      voterIndex: 0,
-      voterId: 99999999999n,
-      electionId: ELECTION_ID,
-      raceId: RACE_ID,
-      candidateId: CANDIDATE_ALICE,
-    });
-
-    await expectCustomError(
-      voting.connect(voter).castVote(RACE_ID, pubSignals, proofArr),
-      "InvalidMerkleRoot"
-    );
-  });
-
-  // ── Wrong election id ───────────────────────────────────────────────────
-  it("wrong election id: pubSignals[3] mismatch is rejected", async () => {
-    const { proofArr, pubSignals } = await generateProof({
-      tree,
-      voterIndex: 0,
-      voterId: VOTER_IDS[0],
-      electionId: 999n,
-      raceId: RACE_ID,
-      candidateId: CANDIDATE_ALICE,
-    });
-
-    await expectCustomError(
-      voting.connect(voter).castVote(RACE_ID, pubSignals, proofArr),
-      "InvalidElectionId"
-    );
-  });
-
-  // ── Invalid proof bytes ─────────────────────────────────────────────────
-  it("invalid proof bytes: tampering proof[0] makes the verifier reject", async () => {
-    const { proofArr, pubSignals } = await generateProof({
-      tree,
-      voterIndex: 0,
-      voterId: VOTER_IDS[0],
-      electionId: ELECTION_ID,
-      raceId: RACE_ID,
-      candidateId: CANDIDATE_ALICE,
-    });
-
-    const broken = [...proofArr];
-    broken[0] = (broken[0] + 1n) % (1n << 254n);
-
-    // PlonkVerifier may revert via assembly or return false → InvalidProof.
-    await expectAnyRevert(
-      voting.connect(voter).castVote(RACE_ID, pubSignals, broken)
-    );
-  });
-
-  // ── Election state guard (FINISHED) ─────────────────────────────────────
-  it("election state guard: castVote in FINISHED state is rejected", async () => {
-    const { proofArr, pubSignals } = await generateProof({
-      tree,
-      voterIndex: 0,
-      voterId: VOTER_IDS[0],
-      electionId: ELECTION_ID,
-      raceId: RACE_ID,
-      candidateId: CANDIDATE_ALICE,
-    });
-
-    await (await voting.closeElection()).wait();
-    await expectCustomError(
-      voting.connect(voter).castVote(RACE_ID, pubSignals, proofArr),
-      "ElectionNotOpen"
-    );
-  });
-
-  // ── Blank vote ──────────────────────────────────────────────────────────
-  it("blank vote: candidate_id = 0 increments race.blankVotes", async () => {
-    const { proofArr, pubSignals } = await generateProof({
-      tree,
-      voterIndex: 2,
-      voterId: VOTER_IDS[2],
-      electionId: ELECTION_ID,
-      raceId: RACE_ID,
-      candidateId: BLANK,
-    });
-
-    await (await voting.connect(voter).castVote(RACE_ID, pubSignals, proofArr)).wait();
-    const [, blank, nullVotes, total] = await voting.getResults();
-    expect(blank).to.equal(1n);
-    expect(nullVotes).to.equal(0n);
-    expect(total).to.equal(1n);
-  });
-
-  // ── Null/spoiled vote ───────────────────────────────────────────────────
-  it("null vote: candidate_id = 999 increments race.nullVotes", async () => {
-    const { proofArr, pubSignals } = await generateProof({
-      tree,
-      voterIndex: 2,
-      voterId: VOTER_IDS[2],
-      electionId: ELECTION_ID,
-      raceId: RACE_ID,
-      candidateId: NULL_VOTE,
-    });
-
-    await (await voting.connect(voter).castVote(RACE_ID, pubSignals, proofArr)).wait();
-    const [, blank, nullVotes, total] = await voting.getResults();
-    expect(blank).to.equal(0n);
-    expect(nullVotes).to.equal(1n);
-    expect(total).to.equal(1n);
-  });
-
-  // ── Multi-vote tally audit ──────────────────────────────────────────────
-  it("results audit: 3 voters → counts match off-chain expectation", async () => {
-    const signers = [voter, otherVoter, third];
-    const choices = [CANDIDATE_ALICE, CANDIDATE_BRUNO, CANDIDATE_ALICE];
-
-    for (let i = 0; i < VOTER_IDS.length; i++) {
+    for (let i = 0; i < races.length; i++) {
       const { proofArr, pubSignals } = await generateProof({
         tree,
-        voterIndex: i,
-        voterId: VOTER_IDS[i],
+        voterIndex: 0,
+        voterId: VOTER_IDS[0],
         electionId: ELECTION_ID,
-        raceId: RACE_ID,
-        candidateId: choices[i],
+        raceId: races[i],
+        candidateId: candidatesPicked[i],
       });
-      await (await voting.connect(signers[i]).castVote(RACE_ID, pubSignals, proofArr)).wait();
+      expect(pubSignals[4]).to.equal(races[i]);
+
+      const tx = await voting.connect(voter).castVote(races[i], pubSignals, proofArr);
+      const rc = await tx.wait();
+      const ev = rc.logs
+        .map((l) => { try { return voting.interface.parseLog(l); } catch (_) { return null; } })
+        .find((p) => p?.name === "VoteCast");
+      expect(ev, `VoteCast for race ${races[i]}`).to.not.equal(undefined);
+      expect(ev.args[1]).to.equal(races[i]);
+      expect(ev.args[2]).to.equal(candidatesPicked[i]);
+      nullifiers.push(pubSignals[1]);
     }
 
-    const [resCandidates, blank, nullVotes, total] = await voting.getResults();
-    expect(total).to.equal(3n);
-    expect(blank).to.equal(0n);
-    expect(nullVotes).to.equal(0n);
-    expect(resCandidates[0].voteCount).to.equal(2n); // Alice
-    expect(resCandidates[1].voteCount).to.equal(1n); // Bruno
-  });
-});
-/**
- * test/integration/e2e_real_proof.test.js
- *
- * INTEGRATION SUITE — real PLONK proof, real PlonkVerifier, real on-chain castVote.
- *
- * Boundary: pi-votacao-zk-circuits ⇄ pi-votacao-zk-blockchain.
- * See ../../.github/copilot-instructions.md (root) Section 2 for invariants
- * and Section 4 for the full required scenario list.
- *
- * The whole suite is skipped if ZK artifacts are missing (run `npm run sync:circuit`
- * from this repo first).
- *
- * Boundary constraint enforced by VotingContract for this PoC:
- *   POC_RACE_ID = 0  →  multi-race scenarios are intentionally NOT covered here.
- *   See SESSION_LOG (blockchain repo) "Multi-race real" deferred item.
- */
-"use strict";
+    // 3 distinct nullifiers (Poseidon(voter, election, race) varies per race).
+    expect(new Set(nullifiers.map((n) => n.toString())).size).to.equal(3);
 
-const { expect } = require("chai");
-const { ethers } = require("hardhat");
-const {
-  loadFixture,
-} = require("@nomicfoundation/hardhat-network-helpers");
-
-const {
-  artifactsAvailable,
-  buildPoseidonTree,
-  generateProof,
-} = require("./helpers/proof");
-
-// ─── Scenario constants ────────────────────────────────────────────────────
-const ELECTION_ID = 1n;
-const RACE_ID = 0n; // POC_RACE_ID — pinned by the contract
-const VOTER_IDS = [12345678901n, 22222222222n, 33333333333n];
-const CANDIDATES = [
-  ["Alice Oliveira", "PT", 13n],
-  ["Bruno Silva", "PSD", 45n],
-];
-const CANDIDATE_ALICE = 1n;
-const CANDIDATE_BRUNO = 2n;
-const BLANK = 0n;
-const NULL_VOTE = 999n;
-
-// ─── Shared fixture: deploy real PlonkVerifier + VotingContract, OPEN state ─
-async function realProofOpenFixture() {
-  const [admin, voter, otherVoter] = await ethers.getSigners();
-
-  const Plonk = await ethers.getContractFactory("PlonkVerifier");
-  const verifier = await Plonk.deploy();
-  await verifier.waitForDeployment();
-
-  const Voting = await ethers.getContractFactory("VotingContract");
-  const voting = await Voting.deploy(await verifier.getAddress());
-  await voting.waitForDeployment();
-
-  await voting.createElection("Eleicao Integracao", "E2E real-proof suite");
-  for (const c of CANDIDATES) await voting.addCandidate(...c);
-
-  const tree = await buildPoseidonTree(VOTER_IDS);
-  const leafHashes = VOTER_IDS.map((_, i) => tree.leaves[i]);
-
-  await voting.registerVoterHashes(leafHashes);
-  await voting.setMerkleRoot(tree.root);
-  await voting.openElection();
-
-  return { admin, voter, otherVoter, verifier, voting, tree };
-}
-
-// ─── Suite ─────────────────────────────────────────────────────────────────
-describe("Integration: real PLONK proof → on-chain castVote", function () {
-  // PLONK proof generation is heavy; bump per-test timeout.
-  this.timeout(120_000);
-
-  before(function () {
-    if (!artifactsAvailable()) {
-      // eslint-disable-next-line no-console
-      console.warn(
-        "\n  [SKIP] integration suite — ZK artifacts not found.\n" +
-          "         Run: npm run sync:circuit\n",
-      );
-      this.skip();
-    }
+    // Tallies for each race.
+    const [, , , totalR0] = await voting.getRaceResults(RACE_ID);
+    const [, , , totalR1] = await voting.getRaceResults(RACE_ID_GOV);
+    const [, , , totalR2] = await voting.getRaceResults(RACE_ID_SEN);
+    expect(totalR0).to.equal(1n);
+    expect(totalR1).to.equal(1n);
+    expect(totalR2).to.equal(1n);
   });
 
-  // ── Happy path ──────────────────────────────────────────────────────────
-  it("happy path: registered voter casts a vote, counter increments, VoteCast emitted", async () => {
-    const { voting, voter, tree } = await loadFixture(realProofOpenFixture);
-
-    const { proofArr, pubSignals } = await generateProof({
-      tree,
-      voterIndex: 0,
-      voterId: VOTER_IDS[0],
-      electionId: ELECTION_ID,
-      raceId: RACE_ID,
-      candidateId: CANDIDATE_ALICE,
+  it("cross-race nullifier isolation: nullifier marked per (raceId, nullifier) only", async () => {
+    const { proofArr: p0, pubSignals: s0 } = await generateProof({
+      tree, voterIndex: 1, voterId: VOTER_IDS[1],
+      electionId: ELECTION_ID, raceId: RACE_ID, candidateId: CANDIDATE_BRUNO,
+    });
+    const { proofArr: p1, pubSignals: s1 } = await generateProof({
+      tree, voterIndex: 1, voterId: VOTER_IDS[1],
+      electionId: ELECTION_ID, raceId: RACE_ID_GOV, candidateId: 1n,
     });
 
-    // Sanity: pubSignals carry the canonical 5 in the canonical order.
-    expect(pubSignals).to.have.lengthOf(5);
-    expect(pubSignals[0]).to.equal(BigInt(tree.root));
-    expect(pubSignals[2]).to.equal(CANDIDATE_ALICE);
-    expect(pubSignals[3]).to.equal(ELECTION_ID);
-    expect(pubSignals[4]).to.equal(RACE_ID);
+    let nonce = await provider.getTransactionCount(voter.address, "latest");
+    await (await voting.connect(voter).castVote(RACE_ID, s0, p0, { nonce: nonce++ })).wait();
+    // Same voter id, different race → different nullifier, must succeed independently.
+    await (await voting.connect(voter).castVote(RACE_ID_GOV, s1, p1, { nonce: nonce++ })).wait();
 
-    await expect(
-      voting.connect(voter).castVote(RACE_ID, pubSignals, proofArr),
-    )
-      .to.emit(voting, "VoteCast")
-      .withArgs(pubSignals[1], RACE_ID, CANDIDATE_ALICE);
-
-    const [resCandidates, blank, nullVotes, total] = await voting.getResults();
-    expect(total).to.equal(1n);
-    expect(blank).to.equal(0n);
-    expect(nullVotes).to.equal(0n);
-    expect(resCandidates[0].voteCount).to.equal(1n);
-    expect(resCandidates[1].voteCount).to.equal(0n);
-
-    expect(await voting.isNullifierUsed(RACE_ID, pubSignals[1])).to.equal(true);
+    expect(await voting.isNullifierUsed(RACE_ID, s0[1])).to.equal(true);
+    expect(await voting.isNullifierUsed(RACE_ID_GOV, s1[1])).to.equal(true);
+    // Each race's nullifier table is independent.
+    expect(await voting.isNullifierUsed(RACE_ID, s1[1])).to.equal(false);
+    expect(await voting.isNullifierUsed(RACE_ID_GOV, s0[1])).to.equal(false);
   });
 
-  // ── Double vote ─────────────────────────────────────────────────────────
-  it("double vote: same nullifier rejected the second time", async () => {
-    const { voting, voter, tree } = await loadFixture(realProofOpenFixture);
-
+  it("invalid raceId: castVote(99, ...) reverts with InvalidRaceId", async () => {
     const { proofArr, pubSignals } = await generateProof({
-      tree,
-      voterIndex: 1,
-      voterId: VOTER_IDS[1],
-      electionId: ELECTION_ID,
-      raceId: RACE_ID,
-      candidateId: CANDIDATE_BRUNO,
+      tree, voterIndex: 0, voterId: VOTER_IDS[0],
+      electionId: ELECTION_ID, raceId: RACE_ID, candidateId: CANDIDATE_ALICE,
     });
-
-    await voting.connect(voter).castVote(RACE_ID, pubSignals, proofArr);
-    await expect(
-      voting.connect(voter).castVote(RACE_ID, pubSignals, proofArr),
-    ).to.be.revertedWithCustomError(voting, "NullifierAlreadyUsed");
-  });
-
-  // ── Relay attack ────────────────────────────────────────────────────────
-  it("relay attack: tampering pubSignals[4] (race_id) breaks proof verification", async () => {
-    const { voting, voter, tree } = await loadFixture(realProofOpenFixture);
-
-    const { proofArr, pubSignals } = await generateProof({
-      tree,
-      voterIndex: 0,
-      voterId: VOTER_IDS[0],
-      electionId: ELECTION_ID,
-      raceId: RACE_ID,
-      candidateId: CANDIDATE_ALICE,
-    });
-
-    // Flip race_id to 1 in pubSignals while keeping the proof bytes intact.
-    const tampered = [...pubSignals];
-    tampered[4] = 1n;
-
-    // First the contract guards raceId==pubSignals[4]. We pass raceId=1 so
-    // the request reaches the verifier; verification then fails because the
-    // proof was bound to race_id=0.
-    // But raceId=1 also fails the POC_RACE_ID guard, so we'd revert earlier.
-    // Pass raceId=0 instead → the contract's RaceIdMismatch fires first.
-    await expect(
-      voting.connect(voter).castVote(RACE_ID, tampered, proofArr),
-    ).to.be.revertedWithCustomError(voting, "RaceIdMismatch");
-  });
-
-  // ── Wrong Merkle root ───────────────────────────────────────────────────
-  it("wrong merkle root: voter from a stale tree is rejected", async () => {
-    const { voting, voter } = await loadFixture(realProofOpenFixture);
-
-    // Build a *different* tree (voter not in the on-chain set) and try to vote.
-    const staleTree = await buildPoseidonTree([99999999999n]);
-    const { proofArr, pubSignals } = await generateProof({
-      tree: staleTree,
-      voterIndex: 0,
-      voterId: 99999999999n,
-      electionId: ELECTION_ID,
-      raceId: RACE_ID,
-      candidateId: CANDIDATE_ALICE,
-    });
-
-    await expect(
-      voting.connect(voter).castVote(RACE_ID, pubSignals, proofArr),
-    ).to.be.revertedWithCustomError(voting, "InvalidMerkleRoot");
-  });
-
-  // ── Wrong election id ───────────────────────────────────────────────────
-  it("wrong election id: pubSignals[3] mismatch is rejected", async () => {
-    const { voting, voter, tree } = await loadFixture(realProofOpenFixture);
-
-    const { proofArr, pubSignals } = await generateProof({
-      tree,
-      voterIndex: 0,
-      voterId: VOTER_IDS[0],
-      electionId: 999n, // wrong election
-      raceId: RACE_ID,
-      candidateId: CANDIDATE_ALICE,
-    });
-
-    await expect(
-      voting.connect(voter).castVote(RACE_ID, pubSignals, proofArr),
-    ).to.be.revertedWithCustomError(voting, "InvalidElectionId");
-  });
-
-  // ── Invalid proof bytes ─────────────────────────────────────────────────
-  it("invalid proof bytes: tampering proof[0] makes the verifier reject", async () => {
-    const { voting, voter, tree } = await loadFixture(realProofOpenFixture);
-
-    const { proofArr, pubSignals } = await generateProof({
-      tree,
-      voterIndex: 0,
-      voterId: VOTER_IDS[0],
-      electionId: ELECTION_ID,
-      raceId: RACE_ID,
-      candidateId: CANDIDATE_ALICE,
-    });
-
-    const broken = [...proofArr];
-    broken[0] = (broken[0] + 1n) % (1n << 254n); // perturb a single field element
-
-    await expect(
-      voting.connect(voter).castVote(RACE_ID, pubSignals, broken),
-    ).to.be.reverted; // PlonkVerifier may revert (asm) or return false → InvalidProof
-  });
-
-  // ── Election state guard (PENDING / FINISHED) ───────────────────────────
-  it("election state guard: castVote in FINISHED state is rejected", async () => {
-    const { voting, voter, tree } = await loadFixture(realProofOpenFixture);
-
-    const { proofArr, pubSignals } = await generateProof({
-      tree,
-      voterIndex: 0,
-      voterId: VOTER_IDS[0],
-      electionId: ELECTION_ID,
-      raceId: RACE_ID,
-      candidateId: CANDIDATE_ALICE,
-    });
-
-    await voting.closeElection();
-
-    await expect(
-      voting.connect(voter).castVote(RACE_ID, pubSignals, proofArr),
-    ).to.be.revertedWithCustomError(voting, "ElectionNotOpen");
-  });
-
-  // ── Blank vote ──────────────────────────────────────────────────────────
-  it("blank vote: candidate_id = 0 increments race.blankVotes", async () => {
-    const { voting, voter, tree } = await loadFixture(realProofOpenFixture);
-
-    const { proofArr, pubSignals } = await generateProof({
-      tree,
-      voterIndex: 2,
-      voterId: VOTER_IDS[2],
-      electionId: ELECTION_ID,
-      raceId: RACE_ID,
-      candidateId: BLANK,
-    });
-
-    await voting.connect(voter).castVote(RACE_ID, pubSignals, proofArr);
-
-    const [, blank, nullVotes, total] = await voting.getResults();
-    expect(blank).to.equal(1n);
-    expect(nullVotes).to.equal(0n);
-    expect(total).to.equal(1n);
-  });
-
-  // ── Null/spoiled vote ───────────────────────────────────────────────────
-  it("null vote: candidate_id = 999 increments race.nullVotes", async () => {
-    const { voting, voter, tree } = await loadFixture(realProofOpenFixture);
-
-    const { proofArr, pubSignals } = await generateProof({
-      tree,
-      voterIndex: 2,
-      voterId: VOTER_IDS[2],
-      electionId: ELECTION_ID,
-      raceId: RACE_ID,
-      candidateId: NULL_VOTE,
-    });
-
-    await voting.connect(voter).castVote(RACE_ID, pubSignals, proofArr);
-
-    const [, blank, nullVotes, total] = await voting.getResults();
-    expect(blank).to.equal(0n);
-    expect(nullVotes).to.equal(1n);
-    expect(total).to.equal(1n);
-  });
-
-  // ── Multi-vote tally audit ──────────────────────────────────────────────
-  it("results audit: 3 voters → counts match off-chain expectation", async () => {
-    const { voting, voter, otherVoter, tree } = await loadFixture(realProofOpenFixture);
-    const [, , , third] = await ethers.getSigners();
-
-    const wallets = [voter, otherVoter, third];
-    const choices = [CANDIDATE_ALICE, CANDIDATE_BRUNO, CANDIDATE_ALICE];
-
-    for (let i = 0; i < VOTER_IDS.length; i++) {
-      const { proofArr, pubSignals } = await generateProof({
-        tree,
-        voterIndex: i,
-        voterId: VOTER_IDS[i],
-        electionId: ELECTION_ID,
-        raceId: RACE_ID,
-        candidateId: choices[i],
-      });
-      await voting.connect(wallets[i]).castVote(RACE_ID, pubSignals, proofArr);
-    }
-
-    const [resCandidates, blank, nullVotes, total] = await voting.getResults();
-    expect(total).to.equal(3n);
-    expect(blank).to.equal(0n);
-    expect(nullVotes).to.equal(0n);
-    expect(resCandidates[0].voteCount).to.equal(2n); // Alice
-    expect(resCandidates[1].voteCount).to.equal(1n); // Bruno
+    await expectCustomError(
+      voting.connect(voter).castVote(99n, pubSignals, proofArr),
+      "InvalidRaceId",
+      voting.interface
+    );
   });
 });
