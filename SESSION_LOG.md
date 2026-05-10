@@ -272,3 +272,119 @@ Mirrored from root [SESSION_LOG.md](../SESSION_LOG.md) entry of 2026-04-25. Test
 
 ### Session report
 - Full report at `reports/SESSION_REPORT_2026-05-06.md`.
+
+---
+
+## Mirrored from root integration session — 2026-05-07
+
+See [../SESSION_LOG.md](../SESSION_LOG.md) for the full integration entry.
+
+### Test-relevant changes that landed in this repo
+
+1. **`test/integration/helpers/anvil.js`** — `revert()` now mines an empty
+   block after `evm_revert` to repair the post-revert "latest" block so
+   ethers v6 `getFeeData()` doesn't crash on `block.hash === null`. Was
+   the root cause of a transient happy-path test failure. No contract
+   change.
+
+2. **`scripts/leave_vote_for_otterscan.js`** — new no-revert demo runner.
+   Connects to dockerized anvil, deploys, sets up election, casts ONE
+   real-PLONK vote, prints Otterscan URLs. Used to leave the appendix
+   screenshot artifact at `reports/runtime/OTTERSCAN_DEMO.md`.
+
+3. **`reports/audit/SUMMARY.md` + `reports/audit/slither.{json,md}`**
+   — Slither (0.11.5, solc 0.8.24) finally executed via direct-file
+   invocation (`slither src/VotingContract.sol --solc-remaps "@openzeppelin/=lib/openzeppelin-contracts/"`).
+   19 findings, 0 High, 1 Medium + 1 Low both confirmed false positives
+   (function carries `nonReentrant`, callee `verifier.verifyProof` is
+   `view`-only). All findings triaged in `SUMMARY.md`.
+
+### Test results in this repo
+- `forge test` — **66 / 66 PASS**.
+- `npm run test:integration` (Mocha + dockerized anvil + real PLONK) —
+  **13 / 13 PASS**, including all multi-race scenarios.
+- `SMOKE_VIZ=1 bash ../scripts/docker_smoke.sh` — **4 / 4 PASS**.
+- `node scripts/leave_vote_for_otterscan.js` — **1 / 1**, tx
+  `0x8866374cbadaaa43a5e04eac5af2f57a46bd56f74f97fe2ae6f88fc1181feaba`
+  on block 10, single `VoteCast` event emitted.
+
+### Boundary state preserved
+- `Verifier.sol` SHA-256 unchanged: `fe24c84d…6944`.
+- 5 public-signal layout `[merkle_root, nullifier_hash, candidate_id,
+  election_id, race_id]` unchanged.
+- `nullifier = Poseidon(voter_id, election_id, race_id)` unchanged.
+
+
+---
+
+## Session — 2026-05-07 (addendum: local Sourcify, mirrored from root)
+
+Mirrored test-relevant content from the root integration log entry of the
+same date. See [`../SESSION_LOG.md`](../SESSION_LOG.md) §"Integration session — 2026-05-07 (addendum: local Sourcify)" for the full rationale.
+
+### What touched this repo
+- Added [scripts/publish_sourcify.js](scripts/publish_sourcify.js) — reads
+  `out/<File>.sol/<Name>.json`, takes the embedded `metadata` blob, copies
+  it plus every referenced source into the root-level
+  `viz/sourcify-repo/contracts/full_match/31337/<checksumAddress>/`. Lib
+  paths under `lib/openzeppelin-contracts/...` are resolved against this
+  repo's working tree.
+- Modified [scripts/leave_vote_for_otterscan.js](scripts/leave_vote_for_otterscan.js)
+  to call `resetRepo()` once and `publishContract()` for both
+  `PlonkVerifier` and `VotingContract` immediately after deploy. No
+  contract or test code was changed.
+
+### Test results
+- `node scripts/leave_vote_for_otterscan.js` — PASS end-to-end.
+  - Deterministic addresses on fresh anvil reset (chainId 31337):
+    - `PlonkVerifier`  → `0x5FbDB2315678afecb367f032d93F642f64180aa3`
+    - `VotingContract` → `0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512`
+  - Voter EOA: `0x70997970C51812dc3A010C7d01b50e0d17dc79C8`
+  - Tx: `0x5adf0babdb1618653effa912af07867262dfd4bd9b4e77ca3719ffebf90a926b` (block 10, gas 378 040).
+- Sources published: PlonkVerifier=1, VotingContract=3
+  (`src/VotingContract.sol`, `src/IVerifier.sol`,
+  `lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol`).
+- Mocha integration suite (13/13 PASS earlier today) **not re-run** — no
+  contract-side change in this addendum.
+
+### Why this matters for this repo
+Otterscan now renders our `castVote(uint256,uint256[24],uint256[5])`
+calls with parameter names + decoded events instead of a raw 4-byte
+selector + hex blob. This makes the on-chain demo for the article
+self-explanatory without an external block explorer.
+
+### Blockers
+- None.
+
+---
+
+## Session — 2026-05-10 (integration mirror)
+
+> Mirrored from root [SESSION_LOG.md](../SESSION_LOG.md) — *Integration session — 2026-05-10*. Test-related portion only; see root entry for boundary decisions.
+
+### Contract changes
+- `VotingContract.sol`: `pubSignals` length 5 → 6; `pubSignals[5]` extracted as `pickIndex`.
+- New error `PickIndexOutOfRange(raceId, pickIndex, maxPicks)`; new error `InvalidMaxPicks(maxPicks)`.
+- New per-race config: `setRaceMaxPicks(raceId, maxPicks)`, `getRaceMaxPicks(raceId) returns (uint8)`. Default `maxPicks = 1`.
+- New `transferAdmin(address)` — `onlyAdmin` + `inState(PENDING)`.
+- `registerVoterHashes` now emits `VoterEnrolled(commitment, leafIndex)` per voter.
+- `VoteCast` extended with `uint8 pickIndex`.
+- New `IVerifier.verifyProof(uint256[24], uint256[6])`.
+- `Verifier.sol` re-synced from circuit build (sha256 `7d4e6e86…`).
+- Mocks updated: `MockVerifier.sol`, `RejectingMockVerifier.sol` → `[6]` pubSignals.
+- `BaseTest.sol` helpers: `_pubSignals*` returns `uint256[6]`.
+- New `VotingFactory.sol` (factory + auditor anchor).
+
+### Test results
+- `forge test`: **75/75 PASS**. New suite `test/unit/VotingFactory.t.sol` (9 tests).
+- `npm run test:integration`: **15/15 PASS**, including 2 new scenarios:
+  - `multi-pick happy path` (maxPicks=2, pickIndex 0 + 1, distinct nullifiers)
+  - `PickIndexOutOfRange` (maxPicks=1, pickIndex=1 reverts)
+- `scripts/docker_smoke.sh`: 3/3 PASS.
+
+### Files removed
+- `exit=0` (accidental man-page redirect).
+
+### Open / deferred
+- Cosmetic rename `VotingContract → VotingEvent`.
+- Backend + relayer (need new API design).

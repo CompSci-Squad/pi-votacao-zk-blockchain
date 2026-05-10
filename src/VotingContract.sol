@@ -26,11 +26,13 @@ import "./IVerifier.sol";
  * Public-signal layout expected from voter_proof.circom
  * (canonical definition in IVerifier — see Verifier.sol):
  *   pubSignals[0] — merkle_root    (voter Merkle tree root)
- *   pubSignals[1] — nullifier_hash (Poseidon(voter_id, election_id, race_id))
+ *   pubSignals[1] — nullifier_hash (Poseidon(voter_id, election_id, race_id, pick_index))
  *   pubSignals[2] — candidate_id   (0 = blank, 999 = null, 1..N = sequential ID)
  *   pubSignals[3] — election_id    (unique election identifier)
  *   pubSignals[4] — race_id        (cargo identifier — PUBLIC signal, prevents cross-race
  *                                   proof reuse by a malicious relayer)
+ *   pubSignals[5] — pick_index     (0..maxPicks-1 within the race — PUBLIC signal,
+ *                                   binds nullifier per individual pick for multi-choice)
  */
 contract VotingContract is ReentrancyGuard {
     // ─────────────────────────── State variables ────────────────────────────
@@ -82,6 +84,9 @@ contract VotingContract is ReentrancyGuard {
     // number of registered races (always ≥ 1 — race 0 always exists).
 
     string public race0Name;
+    /// @notice Race 0's `maxPicks` — number of picks each voter may cast in race 0.
+    /// Defaults to 1 (single-choice). Set via {setRaceMaxPicks}.
+    uint8 public race0MaxPicks;
 
     struct Race {
         string name;
@@ -90,6 +95,7 @@ contract VotingContract is ReentrancyGuard {
         uint256 blankVotes;
         uint256 nullVotes;
         uint256 totalVotes;
+        uint8 maxPicks; // number of picks per voter in this race; defaults to 1
     }
     mapping(uint256 => Race) internal extraRaces;
     uint256 public extraRacesCount;
@@ -116,12 +122,15 @@ contract VotingContract is ReentrancyGuard {
         uint256 number
     );
     event VoterHashesRegistered(uint256[] hashes);
+    event VoterEnrolled(uint256 indexed commitment, uint256 indexed leafIndex);
     event MerkleRootSet(uint256 root);
     event ElectionOpened(uint256 timestamp, uint256 electionId);
+    event RaceMaxPicksSet(uint256 indexed raceId, uint8 maxPicks);
     event VoteCast(
         uint256 indexed nullifier,
         uint256 indexed raceId,
-        uint256 indexed candidateId
+        uint256 indexed candidateId,
+        uint8 pickIndex
     );
     event ElectionClosed(uint256 timestamp, uint256 totalVotes);
 
@@ -144,6 +153,8 @@ contract VotingContract is ReentrancyGuard {
     error VoterHashesAlreadyRegistered();
     error InvalidVoterHash(uint256 index);
     error CandidateNumberAlreadyUsed(uint256 number);
+    error PickIndexOutOfRange(uint256 raceId, uint256 pickIndex, uint8 maxPicks);
+    error InvalidMaxPicks(uint8 maxPicks);
 
     // ─────────────────────────────── Modifiers ──────────────────────────────
 
@@ -166,14 +177,33 @@ contract VotingContract is ReentrancyGuard {
     /**
      * @notice Deploy the voting contract.
      * @param _verifier Address of the deployed Verifier (or MockVerifier for tests).
+     *
+     * @dev Admin = `msg.sender` initially. When deployed by VotingFactory, the
+     *      factory transfers admin to the EOA via {transferAdmin} in the same
+     *      transaction.
      */
     constructor(address _verifier) {
         admin = msg.sender;
         state = ElectionState.PENDING;
         verifier = IVerifier(_verifier);
+        race0MaxPicks = 1; // single-choice by default
     }
 
     // ─────────────────────────── Admin functions ────────────────────────────
+
+    /**
+     * @notice Transfer admin rights to a new address. Used by VotingFactory to
+     *         hand control to the EOA that called createEvent(). Allowed only
+     *         while in PENDING state to prevent admin hijacking after voting opens.
+     */
+    function transferAdmin(address newAdmin)
+        external
+        onlyAdmin
+        inState(ElectionState.PENDING)
+    {
+        if (newAdmin == address(0)) revert NotAdmin();
+        admin = newAdmin;
+    }
 
     /**
      * @notice Initialise the election metadata and assign a unique election ID.
@@ -240,7 +270,41 @@ contract VotingContract is ReentrancyGuard {
         extraRacesCount++;
         raceId = extraRacesCount; // 1, 2, 3, ...
         extraRaces[raceId].name = _name;
+        extraRaces[raceId].maxPicks = 1; // single-choice by default
         emit RaceAdded(raceId, _name);
+    }
+
+    /**
+     * @notice Set the number of picks (maxPicks) allowed for a race. The PLONK
+     *         circuit binds each proof to a `pick_index ∈ 0..maxPicks-1`, so
+     *         a voter casts K independent proofs to vote in a K-choice race.
+     *         Each pick has its own nullifier; reusing the same `pick_index`
+     *         twice for the same race triggers `NullifierAlreadyUsed`.
+     * @param raceId   Race identifier (0 = legacy race, 1..extraRacesCount).
+     * @param maxPicks Number of picks per voter (1 = single-choice; >1 = multi-choice).
+     *                 Must be ≥ 1.
+     */
+    function setRaceMaxPicks(uint256 raceId, uint8 maxPicks)
+        external
+        onlyAdmin
+        inState(ElectionState.PENDING)
+    {
+        if (maxPicks == 0) revert InvalidMaxPicks(maxPicks);
+        if (raceId == 0) {
+            race0MaxPicks = maxPicks;
+        } else if (raceId <= extraRacesCount) {
+            extraRaces[raceId].maxPicks = maxPicks;
+        } else {
+            revert InvalidRaceId(raceId);
+        }
+        emit RaceMaxPicksSet(raceId, maxPicks);
+    }
+
+    /// @notice Return the configured maxPicks for a race (defaults to 1).
+    function getRaceMaxPicks(uint256 raceId) public view returns (uint8) {
+        if (raceId == 0) return race0MaxPicks;
+        if (raceId <= extraRacesCount) return extraRaces[raceId].maxPicks;
+        revert InvalidRaceId(raceId);
     }
 
     /**
@@ -293,6 +357,7 @@ contract VotingContract is ReentrancyGuard {
         for (uint256 i = 0; i < n; i++) {
             if (_hashes[i] == 0) revert InvalidVoterHash(i);
             voterHashes.push(_hashes[i]);
+            emit VoterEnrolled(_hashes[i], i);
         }
         emit VoterHashesRegistered(_hashes);
     }
@@ -344,29 +409,30 @@ contract VotingContract is ReentrancyGuard {
      *          3. pubSignals[0] (merkle_root) matches on-chain voterMerkleRoot.
      *          4. pubSignals[3] (election_id) matches currentElectionId.
      *          5. pubSignals[4] (race_id)    matches the raceId function param.
-     *          6. nullifier has not been used for this race.
-     *          7. ZK proof verifies.
+     *          6. pubSignals[5] (pick_index) is < the race's configured maxPicks.
+     *          7. nullifier has not been used for this race.
+     *          8. ZK proof verifies.
      *
      *        EFFECTS (state writes happen AFTER proof verification, so a
      *        malicious or buggy verifier cannot leave inconsistent state):
-     *          8. nullifiers[raceId][nullifier] = true.
-     *          9. tally counters incremented.
+     *          9. nullifiers[raceId][nullifier] = true.
+     *         10. tally counters incremented.
      *
      *        INTERACTIONS:
-     *         10. VoteCast event emitted.
+     *         11. VoteCast event emitted.
      *
      *      `nonReentrant` provides defence-in-depth in case the verifier
      *      address is ever swapped for a non-trusted implementation.
      *
      * @param raceId      Race identifier — 0 (default) or 1..extraRacesCount.
-     * @param pubSignals  [merkle_root, nullifier_hash, candidate_id, election_id, race_id]
+     * @param pubSignals  [merkle_root, nullifier_hash, candidate_id, election_id, race_id, pick_index]
      * @param proof       PLONK proof — 24 field elements as emitted by
      *                    `snarkjs.plonk.exportSolidityCallData` and consumed
      *                    by the snarkjs-generated PlonkVerifier.
      */
     function castVote(
         uint256 raceId,
-        uint256[5]  calldata pubSignals,
+        uint256[6]  calldata pubSignals,
         uint256[24] calldata proof
     ) external nonReentrant inState(ElectionState.OPEN) {
         // ── CHECKS ────────────────────────────────────────────────────────
@@ -377,6 +443,7 @@ contract VotingContract is ReentrancyGuard {
         uint256 candidateId = pubSignals[2];
         uint256 electionId  = pubSignals[3];
         uint256 sigRaceId   = pubSignals[4];
+        uint256 pickIndex   = pubSignals[5];
 
         if (merkleRoot != voterMerkleRoot)
             revert InvalidMerkleRoot(merkleRoot, voterMerkleRoot);
@@ -384,6 +451,9 @@ contract VotingContract is ReentrancyGuard {
             revert InvalidElectionId(electionId, currentElectionId);
         if (sigRaceId != raceId)
             revert RaceIdMismatch(raceId, sigRaceId);
+        uint8 maxPicks = getRaceMaxPicks(raceId);
+        if (pickIndex >= maxPicks)
+            revert PickIndexOutOfRange(raceId, pickIndex, maxPicks);
         if (nullifiers[raceId][nullifier])
             revert NullifierAlreadyUsed(nullifier);
 
@@ -421,7 +491,7 @@ contract VotingContract is ReentrancyGuard {
         }
 
         // ── INTERACTIONS ──────────────────────────────────────────────────
-        emit VoteCast(nullifier, raceId, candidateId);
+        emit VoteCast(nullifier, raceId, candidateId, uint8(pickIndex));
     }
 
     // ──────────────────────────── View functions ─────────────────────────────

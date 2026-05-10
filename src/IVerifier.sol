@@ -8,16 +8,18 @@ pragma solidity 0.8.24;
  *
  *           function verifyProof(
  *               uint256[24] calldata _proof,
- *               uint256[5]  calldata _pubSignals
+ *               uint256[6]  calldata _pubSignals
  *           ) external view returns (bool);
  *
  * Public signals layout (canonical — referenced by all other contracts):
  *   _pubSignals[0] — merkle_root    (voter Merkle tree root)
- *   _pubSignals[1] — nullifier_hash (Poseidon(voter_id, election_id, race_id))
+ *   _pubSignals[1] — nullifier_hash (Poseidon(voter_id, election_id, race_id, pick_index))
  *   _pubSignals[2] — candidate_id   (0 = blank, 999 = null, or sequential candidate ID)
  *   _pubSignals[3] — election_id    (unique election identifier)
  *   _pubSignals[4] — race_id        (cargo identifier — PUBLIC signal, prevents cross-race
  *                                    proof reuse by a malicious relayer)
+ *   _pubSignals[5] — pick_index     (0..maxPicks-1 within the race; binds nullifier per
+ *                                    individual pick in multi-choice races)
  *
  * @dev Intentionally NOT marked `view` so that VotingContract emits a regular
  *      CALL (not STATICCALL). The real snarkjs PlonkVerifier is `view` and
@@ -28,6 +30,6 @@ pragma solidity 0.8.24;
 interface IVerifier {
     function verifyProof(
         uint256[24] calldata _proof,
-        uint256[5] calldata _pubSignals
+        uint256[6] calldata _pubSignals
     ) external returns (bool);
 }

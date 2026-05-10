@@ -71,6 +71,11 @@ async function snapshot(provider) {
 
 async function revert(provider, id) {
   await provider.send("evm_revert", [id]);
+  // Force-mine an empty block so the next "latest" block has all fields
+  // populated (hash, baseFeePerGas, ...). Without this, ethers v6's
+  // getFeeData() can hit a transient post-revert block where `hash` is
+  // null and explode in formatBlock with "Cannot read properties of null".
+  await provider.send("evm_mine", []);
 }
 
 async function resetAnvil(provider) {

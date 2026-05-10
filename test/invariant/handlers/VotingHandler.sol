@@ -62,7 +62,7 @@ contract VotingHandler is Test {
 
         if (nullifier == 0) nullifier = 1;
 
-        uint256[5] memory s;
+        uint256[6] memory s;
         s[0] = MERKLE_ROOT;
         s[1] = nullifier;
         s[2] = candidateId;

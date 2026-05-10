@@ -5,7 +5,7 @@
  *
  * Builds:
  *   - a Poseidon Merkle tree of voter_id leaves (depth 4, matches circuit),
- *   - the canonical nullifier_hash = Poseidon(voter_id, election_id, race_id),
+ *   - the canonical nullifier_hash = Poseidon(voter_id, election_id, race_id, pick_index),
  *   - a real PLONK proof via snarkjs that the contract's PlonkVerifier accepts.
  *
  * Reads ZK artifacts produced by `npm run sync:circuit`:
@@ -18,7 +18,8 @@
  *   pubSignals[2] = candidate_id
  *   pubSignals[3] = election_id
  *   pubSignals[4] = race_id
- * castVote ABI is castVote(uint256 raceId, uint256[5] pubSignals, uint256[24] proof).
+ *   pubSignals[5] = pick_index
+ * castVote ABI is castVote(uint256 raceId, uint256[6] pubSignals, uint256[24] proof).
  */
 "use strict";
 
@@ -83,8 +84,8 @@ async function buildPoseidonTree(voterIds) {
     F,
     leaves: leaves.map((l) => F.toString(l)),
     root: F.toString(tree[TREE_DEPTH][0]),
-    nullifierFor: (voterId, electionId, raceId) =>
-      F.toString(poseidon([voterId, electionId, raceId])),
+    nullifierFor: (voterId, electionId, raceId, pickIndex = 0n) =>
+      F.toString(poseidon([voterId, electionId, raceId, pickIndex])),
     proofFor,
   };
 }
@@ -100,7 +101,9 @@ async function buildPoseidonTree(voterIds) {
  *   electionId   — bigint
  *   raceId       — bigint
  *   candidateId  — bigint (0 = blank, 999 = null, else candidate)
- * @returns {{ proofArr: bigint[24], pubSignals: bigint[5] }}
+ *   pickIndex    — bigint, default 0n. Bound into the nullifier so each pick
+ *                  in a multi-choice race produces a distinct nullifier.
+ * @returns {{ proofArr: bigint[24], pubSignals: bigint[6] }}
  */
 async function generateProof({
   tree,
@@ -109,14 +112,17 @@ async function generateProof({
   electionId,
   raceId,
   candidateId,
+  pickIndex = 0n,
 }) {
   const snarkjs = require("snarkjs");
   const { pathElements, pathIndices } = tree.proofFor(voterIndex);
-  const nullifierHash = tree.nullifierFor(voterId, electionId, raceId);
+  const pickIdx = BigInt(pickIndex);
+  const nullifierHash = tree.nullifierFor(voterId, electionId, raceId, pickIdx);
 
   const input = {
     voter_id: String(voterId),
     race_id: String(raceId),
+    pick_index: String(pickIdx),
     merkle_path: pathElements,
     merkle_path_indices: pathIndices,
     merkle_root: tree.root,

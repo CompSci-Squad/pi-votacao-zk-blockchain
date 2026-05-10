@@ -1,0 +1,72 @@
+'forge clean' running (wd: /media/do-ald533/HD1/github/compsci_squad/pi_votacao/pi-votacao-zk-blockchain)
+'forge config --json' running
+'forge build --build-info src/VotingContract.sol' running (wd: /media/do-ald533/HD1/github/compsci_squad/pi_votacao/pi-votacao-zk-blockchain)
+
+Detector: reentrancy-no-eth
+Reentrancy in VotingContract.castVote(uint256,uint256[5],uint256[24]) (src/VotingContract.sol#367-425):
+	External calls:
+	- ! verifier.verifyProof(proof,pubSignals) (src/VotingContract.sol#392)
+	State variables written after the call(s):
+	- nullifiers[raceId][nullifier] = true (src/VotingContract.sol#396)
+	VotingContract.nullifiers (src/VotingContract.sol#56) can be used in cross function reentrancies:
+	- VotingContract.isNullifierUsed(uint256,uint256) (src/VotingContract.sol#574-581)
+	- VotingContract.nullifiers (src/VotingContract.sol#56)
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#reentrancy-vulnerabilities-2
+
+Detector: reentrancy-benign
+Reentrancy in VotingContract.castVote(uint256,uint256[5],uint256[24]) (src/VotingContract.sol#367-425):
+	External calls:
+	- ! verifier.verifyProof(proof,pubSignals) (src/VotingContract.sol#392)
+	State variables written after the call(s):
+	- blankVotes ++ (src/VotingContract.sol#401)
+	- candidates[candidateId - 1].voteCount ++ (src/VotingContract.sol#407)
+	- r.totalVotes ++ (src/VotingContract.sol#411)
+	- r.blankVotes ++ (src/VotingContract.sol#413)
+	- r.nullVotes ++ (src/VotingContract.sol#415)
+	- r.candidates[candidateId - 1].voteCount ++ (src/VotingContract.sol#419)
+	- nullVotes ++ (src/VotingContract.sol#403)
+	- totalVotes ++ (src/VotingContract.sol#399)
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#reentrancy-vulnerabilities-3
+
+Detector: pragma
+2 different versions of Solidity are used:
+	- Version constraint ^0.8.20 is used by:
+		-^0.8.20 (lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol#4)
+	- Version constraint 0.8.24 is used by:
+		-0.8.24 (src/IVerifier.sol#2)
+		-0.8.24 (src/VotingContract.sol#2)
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#different-pragma-directives-are-used
+
+Detector: cyclomatic-complexity
+VotingContract.castVote(uint256,uint256[5],uint256[24]) (src/VotingContract.sol#367-425) has a high cyclomatic complexity (14).
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#cyclomatic-complexity
+
+Detector: solc-version
+Version constraint ^0.8.20 contains known severe issues (https://solidity.readthedocs.io/en/latest/bugs.html)
+	- VerbatimInvalidDeduplication
+	- FullInlinerNonExpressionSplitArgumentEvaluationOrder
+	- MissingSideEffectsOnSelectorAccess.
+It is used by:
+	- ^0.8.20 (lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol#4)
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#incorrect-versions-of-solidity
+
+Detector: naming-convention
+Parameter VotingContract.createElection(string,string)._name (src/VotingContract.sol#185) is not in mixedCase
+Parameter VotingContract.createElection(string,string)._description (src/VotingContract.sol#186) is not in mixedCase
+Parameter VotingContract.addCandidate(string,string,uint256)._name (src/VotingContract.sol#203) is not in mixedCase
+Parameter VotingContract.addCandidate(string,string,uint256)._party (src/VotingContract.sol#204) is not in mixedCase
+Parameter VotingContract.addCandidate(string,string,uint256)._number (src/VotingContract.sol#205) is not in mixedCase
+Parameter VotingContract.setRace0Name(string)._name (src/VotingContract.sol#219) is not in mixedCase
+Parameter VotingContract.addRace(string)._name (src/VotingContract.sol#234) is not in mixedCase
+Parameter VotingContract.addCandidateToRace(uint256,string,string,uint256)._name (src/VotingContract.sol#252) is not in mixedCase
+Parameter VotingContract.addCandidateToRace(uint256,string,string,uint256)._party (src/VotingContract.sol#253) is not in mixedCase
+Parameter VotingContract.addCandidateToRace(uint256,string,string,uint256)._number (src/VotingContract.sol#254) is not in mixedCase
+Parameter VotingContract.registerVoterHashes(uint256[])._hashes (src/VotingContract.sol#287) is not in mixedCase
+Parameter VotingContract.setMerkleRoot(uint256)._root (src/VotingContract.sol#306) is not in mixedCase
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#conformance-to-solidity-naming-conventions
+
+Detector: immutable-states
+VotingContract.admin (src/VotingContract.sol#40) should be immutable 
+VotingContract.verifier (src/VotingContract.sol#49) should be immutable 
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#state-variables-that-could-be-declared-immutable
+/media/do-ald533/HD1/github/compsci_squad/pi_votacao/pi-votacao-zk-blockchain/src/VotingContract.sol analyzed (3 contracts with 101 detectors), 19 result(s) found

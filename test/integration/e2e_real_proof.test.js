@@ -196,11 +196,12 @@ describe("Integration: real PLONK proof → on-chain castVote", function () {
       candidateId: CANDIDATE_ALICE,
     });
 
-    expect(pubSignals).to.have.lengthOf(5);
+    expect(pubSignals).to.have.lengthOf(6);
     expect(pubSignals[0]).to.equal(BigInt(tree.root));
     expect(pubSignals[2]).to.equal(CANDIDATE_ALICE);
     expect(pubSignals[3]).to.equal(ELECTION_ID);
     expect(pubSignals[4]).to.equal(RACE_ID);
+    expect(pubSignals[5]).to.equal(0n);
 
     const tx = await voting.connect(voter).castVote(RACE_ID, pubSignals, proofArr);
     const rc = await tx.wait();
@@ -467,6 +468,86 @@ describe("Integration: real PLONK proof → on-chain castVote", function () {
     await expectCustomError(
       voting.connect(voter).castVote(99n, pubSignals, proofArr),
       "InvalidRaceId",
+      voting.interface
+    );
+  });
+
+  // ──────────────────────────── Multi-pick scenarios ──────────────────────────
+
+  it("multi-pick happy path: maxPicks=2 → same voter casts pickIndex 0 and 1, distinct nullifiers", async () => {
+    // Race 1 (Governador) supports 2 picks (e.g. coalition vote).
+    const admin = wallets[0];
+    // setRaceMaxPicks must be called in PENDING — we are OPEN, so close-then-reopen
+    // isn't allowed. Use a fresh deployment via snapshot revert + re-setup with maxPicks.
+    // Simpler: invoke through a sub-deployment without re-using the baselineSnapshot.
+    await revert(provider, baselineSnapshot);
+    baselineSnapshot = await snapshot(provider);
+
+    // Re-deploy and re-open, but configure maxPicks=2 for race 1 before opening.
+    let nonce = await provider.getTransactionCount(admin.address, "latest");
+    const VerifierFactory = new ethers.ContractFactory(
+      verifierArtifact.abi, verifierArtifact.bytecode, admin
+    );
+    const verifier = await VerifierFactory.deploy({ nonce: nonce++ });
+    await verifier.waitForDeployment();
+    const VotingF = new ethers.ContractFactory(
+      votingArtifact.abi, votingArtifact.bytecode, admin
+    );
+    const v = await VotingF.deploy(await verifier.getAddress(), { nonce: nonce++ });
+    await v.waitForDeployment();
+    await (await v.createElection("MP", "MultiPick", { nonce: nonce++ })).wait();
+    await (await v.setRace0Name("Pres", { nonce: nonce++ })).wait();
+    for (const c of CANDIDATES) {
+      await (await v.addCandidate(...c, { nonce: nonce++ })).wait();
+    }
+    await (await v.addRace("Gov", { nonce: nonce++ })).wait();
+    for (const c of CANDIDATES_RACE1) {
+      await (await v.addCandidateToRace(RACE_ID_GOV, ...c, { nonce: nonce++ })).wait();
+    }
+    await (await v.setRaceMaxPicks(RACE_ID_GOV, 2, { nonce: nonce++ })).wait();
+    expect(await v.getRaceMaxPicks(RACE_ID_GOV)).to.equal(2n);
+
+    const t = await buildPoseidonTree(VOTER_IDS);
+    await (await v.registerVoterHashes(VOTER_IDS.map((_, i) => t.leaves[i]), { nonce: nonce++ })).wait();
+    await (await v.setMerkleRoot(t.root, { nonce: nonce++ })).wait();
+    await (await v.openElection({ nonce: nonce++ })).wait();
+
+    const nullifiers = [];
+    for (const pick of [0n, 1n]) {
+      const { proofArr, pubSignals } = await generateProof({
+        tree: t, voterIndex: 0, voterId: VOTER_IDS[0],
+        electionId: ELECTION_ID, raceId: RACE_ID_GOV,
+        candidateId: pick === 0n ? 1n : 2n,
+        pickIndex: pick,
+      });
+      expect(pubSignals[5]).to.equal(pick);
+      const tx = await v.connect(voter).castVote(RACE_ID_GOV, pubSignals, proofArr);
+      const rc = await tx.wait();
+      const ev = rc.logs
+        .map((l) => { try { return v.interface.parseLog(l); } catch (_) { return null; } })
+        .find((p) => p?.name === "VoteCast");
+      expect(ev, `VoteCast for pick ${pick}`).to.not.equal(undefined);
+      expect(ev.args[3]).to.equal(pick); // pickIndex (uint8)
+      nullifiers.push(pubSignals[1]);
+    }
+
+    // Two picks produced two different nullifiers.
+    expect(nullifiers[0]).to.not.equal(nullifiers[1]);
+    const [, , , total] = await v.getRaceResults(RACE_ID_GOV);
+    expect(total).to.equal(2n);
+  });
+
+  it("PickIndexOutOfRange: maxPicks=1 → pickIndex=1 reverts", async () => {
+    // Race 0 has default maxPicks = 1. Try pickIndex = 1 → must revert.
+    const { proofArr, pubSignals } = await generateProof({
+      tree, voterIndex: 0, voterId: VOTER_IDS[0],
+      electionId: ELECTION_ID, raceId: RACE_ID, candidateId: CANDIDATE_ALICE,
+      pickIndex: 1n,
+    });
+    expect(pubSignals[5]).to.equal(1n);
+    await expectCustomError(
+      voting.connect(voter).castVote(RACE_ID, pubSignals, proofArr),
+      "PickIndexOutOfRange",
       voting.interface
     );
   });

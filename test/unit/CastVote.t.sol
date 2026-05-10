@@ -37,7 +37,7 @@ contract CastVoteTest is BaseTest {
     function test_CastVote_EmitsVoteCast() public {
         uint256 nul = _makeNullifier(0);
         vm.expectEmit(true, true, true, true);
-        emit VotingContract.VoteCast(nul, POC_RACE_ID, 1);
+        emit VotingContract.VoteCast(nul, POC_RACE_ID, 1, uint8(POC_PICK_INDEX));
         voting.castVote(POC_RACE_ID, _pubSignals(nul, 1), _emptyProof());
     }
 
@@ -81,7 +81,7 @@ contract CastVoteTest is BaseTest {
     // ── public-signal validation reverts ─────────────────────────────────
 
     function test_CastVote_RevertInvalidMerkleRoot() public {
-        uint256[5] memory s = _pubSignalsCustom(0xBADBAD, _makeNullifier(0), 1, ELECTION_ID, POC_RACE_ID);
+        uint256[6] memory s = _pubSignalsCustom(0xBADBAD, _makeNullifier(0), 1, ELECTION_ID, POC_RACE_ID);
         vm.expectRevert(
             abi.encodeWithSelector(VotingContract.InvalidMerkleRoot.selector, uint256(0xBADBAD), MERKLE_ROOT)
         );
@@ -89,7 +89,7 @@ contract CastVoteTest is BaseTest {
     }
 
     function test_CastVote_RevertInvalidElectionId() public {
-        uint256[5] memory s = _pubSignalsCustom(MERKLE_ROOT, _makeNullifier(0), 1, 99, POC_RACE_ID);
+        uint256[6] memory s = _pubSignalsCustom(MERKLE_ROOT, _makeNullifier(0), 1, 99, POC_RACE_ID);
         vm.expectRevert(
             abi.encodeWithSelector(VotingContract.InvalidElectionId.selector, uint256(99), ELECTION_ID)
         );
@@ -98,7 +98,7 @@ contract CastVoteTest is BaseTest {
 
     function test_CastVote_RevertRaceIdMismatch() public {
         // raceId param = 0 but pubSignals[4] = 1 → RaceIdMismatch
-        uint256[5] memory s = _pubSignalsCustom(MERKLE_ROOT, _makeNullifier(0), 1, ELECTION_ID, 1);
+        uint256[6] memory s = _pubSignalsCustom(MERKLE_ROOT, _makeNullifier(0), 1, ELECTION_ID, 1);
         vm.expectRevert(
             abi.encodeWithSelector(VotingContract.RaceIdMismatch.selector, uint256(0), uint256(1))
         );
@@ -106,7 +106,7 @@ contract CastVoteTest is BaseTest {
     }
 
     function test_CastVote_RevertInvalidRaceIdParam() public {
-        uint256[5] memory s = _pubSignalsCustom(MERKLE_ROOT, _makeNullifier(0), 1, ELECTION_ID, 1);
+        uint256[6] memory s = _pubSignalsCustom(MERKLE_ROOT, _makeNullifier(0), 1, ELECTION_ID, 1);
         vm.expectRevert(abi.encodeWithSelector(VotingContract.InvalidRaceId.selector, uint256(1)));
         voting.castVote(1, s, _emptyProof());
     }
@@ -117,7 +117,7 @@ contract CastVoteTest is BaseTest {
         voting = new VotingContract(address(r));
         _createElection();
         _openElection();
-        uint256[5] memory s = _pubSignals(_makeNullifier(0), 1);
+        uint256[6] memory s = _pubSignals(_makeNullifier(0), 1);
         vm.expectRevert(VotingContract.InvalidProof.selector);
         voting.castVote(POC_RACE_ID, s, _emptyProof());
     }
@@ -128,14 +128,14 @@ contract CastVoteTest is BaseTest {
         // Re-deploy in PENDING (no openElection)
         _deploy();
         _createElection();
-        uint256[5] memory s = _pubSignals(_makeNullifier(0), 1);
+        uint256[6] memory s = _pubSignals(_makeNullifier(0), 1);
         vm.expectRevert(VotingContract.ElectionNotOpen.selector);
         voting.castVote(POC_RACE_ID, s, _emptyProof());
     }
 
     function test_CastVote_RevertWhenFinished() public {
         voting.closeElection();
-        uint256[5] memory s = _pubSignals(_makeNullifier(0), 1);
+        uint256[6] memory s = _pubSignals(_makeNullifier(0), 1);
         vm.expectRevert(VotingContract.ElectionNotOpen.selector);
         voting.castVote(POC_RACE_ID, s, _emptyProof());
     }
@@ -143,7 +143,7 @@ contract CastVoteTest is BaseTest {
     // ── candidate id validation ──────────────────────────────────────────
 
     function test_CastVote_RevertOnUnknownCandidate() public {
-        uint256[5] memory s = _pubSignals(_makeNullifier(0), 50);
+        uint256[6] memory s = _pubSignals(_makeNullifier(0), 50);
         vm.expectRevert(abi.encodeWithSelector(VotingContract.CandidateNotFound.selector, uint256(50)));
         voting.castVote(POC_RACE_ID, s, _emptyProof());
     }

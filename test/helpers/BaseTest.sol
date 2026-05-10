@@ -10,7 +10,7 @@ import {RejectingMockVerifier} from "../mocks/RejectingMockVerifier.sol";
 ///   - 15 voters in a depth-4 Merkle tree (max 16 leaves)
 ///   - sentinel MERKLE_ROOT
 ///   - electionId == 1 (assigned by createElection)
-///   - canonical pubSignals layout [merkleRoot, nullifier, candidateId, electionId, raceId]
+///   - canonical pubSignals layout [merkleRoot, nullifier, candidateId, electionId, raceId, pickIndex]
 abstract contract BaseTest is Test {
     VotingContract internal voting;
     MockVerifier internal mockVerifier;
@@ -19,6 +19,7 @@ abstract contract BaseTest is Test {
     address internal stranger = address(0xBEEF);
 
     uint256 internal constant POC_RACE_ID = 0;
+    uint256 internal constant POC_PICK_INDEX = 0;
     uint256 internal constant ELECTION_ID = 1;
     uint256 internal constant BLANK_VOTE = 0;
     uint256 internal constant NULL_VOTE = 999;
@@ -48,13 +49,14 @@ abstract contract BaseTest is Test {
     function _pubSignals(uint256 nullifier, uint256 candidateId)
         internal
         pure
-        returns (uint256[5] memory s)
+        returns (uint256[6] memory s)
     {
         s[0] = MERKLE_ROOT;
         s[1] = nullifier;
         s[2] = candidateId;
         s[3] = ELECTION_ID;
         s[4] = POC_RACE_ID;
+        s[5] = POC_PICK_INDEX;
     }
 
     function _pubSignalsCustom(
@@ -63,12 +65,27 @@ abstract contract BaseTest is Test {
         uint256 candidateId,
         uint256 electionId,
         uint256 raceId
-    ) internal pure returns (uint256[5] memory s) {
+    ) internal pure returns (uint256[6] memory s) {
         s[0] = merkleRoot;
         s[1] = nullifier;
         s[2] = candidateId;
         s[3] = electionId;
         s[4] = raceId;
+        s[5] = POC_PICK_INDEX;
+    }
+
+    function _pubSignalsWithPick(
+        uint256 nullifier,
+        uint256 candidateId,
+        uint256 raceId,
+        uint256 pickIndex
+    ) internal pure returns (uint256[6] memory s) {
+        s[0] = MERKLE_ROOT;
+        s[1] = nullifier;
+        s[2] = candidateId;
+        s[3] = ELECTION_ID;
+        s[4] = raceId;
+        s[5] = pickIndex;
     }
 
     /// @dev Deterministic non-zero unique nullifier per voter index (mirrors makeNullifier).

@@ -7,19 +7,19 @@ pragma solidity 0.8.24;
  *         exercise VotingContract without a real ZK backend.
  *
  *         Mirrors the snarkjs-generated PlonkVerifier ABI exactly:
- *           verifyProof(uint256[24] calldata, uint256[5] calldata)
+ *           verifyProof(uint256[24] calldata, uint256[6] calldata)
  *
  *         Stores the last submitted proof and pubSignals for inspection via
  *         getLastProof(i) / getLastPubSignal(i), enabling tests to assert the
- *         exact order of pubSignals[0..4] passed by castVote().
+ *         exact order of pubSignals[0..5] passed by castVote().
  *
  *         NEVER deploy this on a public network.
  */
 contract MockVerifier {
     /// @dev Last proof submitted to verifyProof (24 field elements)
     uint256[24] private _lastProof;
-    /// @dev Last pubSignals submitted to verifyProof (5 field elements)
-    uint256[5]  private _lastPubSignals;
+    /// @dev Last pubSignals submitted to verifyProof (6 field elements)
+    uint256[6]  private _lastPubSignals;
     /// @dev Set true on the first call — useful for asserting the verifier was hit
     bool public called;
 
@@ -37,12 +37,12 @@ contract MockVerifier {
      */
     function verifyProof(
         uint256[24] calldata _proof,
-        uint256[5]  calldata _pubSignals
+        uint256[6]  calldata _pubSignals
     ) external returns (bool) {
         for (uint256 i = 0; i < 24; i++) {
             _lastProof[i] = _proof[i];
         }
-        for (uint256 i = 0; i < 5; i++) {
+        for (uint256 i = 0; i < 6; i++) {
             _lastPubSignals[i] = _pubSignals[i];
         }
         called = true;
@@ -51,10 +51,10 @@ contract MockVerifier {
 
     /**
      * @notice Return the i-th element of the last submitted pubSignals.
-     * @param i Index 0–4.
+     * @param i Index 0–5.
      */
     function getLastPubSignal(uint256 i) external view returns (uint256) {
-        require(i < 5, "MockVerifier: indice fora do intervalo");
+        require(i < 6, "MockVerifier: indice fora do intervalo");
         return _lastPubSignals[i];
     }
 
